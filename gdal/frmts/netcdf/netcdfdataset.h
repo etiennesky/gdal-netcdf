@@ -119,6 +119,7 @@
 #define NCDF_
 
 /*original mappings (both SRS_PT and SRS_PP) */
+
 typedef struct {
     const char *netCDFSRS;
     const char *SRS; 

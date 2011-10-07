@@ -2662,7 +2662,8 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
         // bBottomUp = TRUE;
         bWriteGeoTransform = TRUE;
         bWriteCFLonLat = CSLFetchBoolean( papszOptions, "WRITELONLAT", FALSE );
-        bWriteGDALTags = CSLFetchBoolean( papszOptions, "WRITEGDALTAGS", FALSE );
+        // bWriteGDALTags = CSLFetchBoolean( papszOptions, "WRITEGDALTAGS", FALSE );
+        bWriteGDALTags = CSLFetchBoolean( papszOptions, "WRITEGDALTAGS", TRUE );
         eLonLatType = NC_FLOAT;
         const char *pszValue =  CSLFetchNameValue(papszOptions,"TYPELONLAT");
         if ( pszValue && EQUAL(pszValue, "DOUBLE" ) ) 
@@ -2684,7 +2685,8 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
         if ( oSRS.IsGeographic() )  bWriteGeoTransform = TRUE;
         else  bWriteGeoTransform = FALSE;
         bWriteCFLonLat = CSLFetchBoolean( papszOptions, "WRITELONLAT", TRUE );
-        bWriteGDALTags = CSLFetchBoolean( papszOptions, "WRITEGDALTAGS", FALSE );
+        // bWriteGDALTags = CSLFetchBoolean( papszOptions, "WRITEGDALTAGS", FALSE );
+        bWriteGDALTags = CSLFetchBoolean( papszOptions, "WRITEGDALTAGS", TRUE );
         eLonLatType = NC_DOUBLE;
         const char *pszValue =  CSLFetchNameValue(papszOptions,"TYPELONLAT");
         if ( pszValue && EQUAL(pszValue, "FLOAT" ) ) 
@@ -2776,13 +2778,22 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 /* -------------------------------------------------------------------- */
 
         /* Basic Projection info (grid_mapping and datum) */
-        for( int i=0; poNetcdfSRS[i].netCDFSRS != NULL; i++ ) {
-            if( EQUAL( poNetcdfSRS[i].SRS, pszProjection ) ) {
-                CPLDebug( "GDAL_netCDF", "PROJECTION = %s", 
-                          poNetcdfSRS[i].netCDFSRS);
-                strcpy( pszNetcdfProjection, poNetcdfSRS[i].netCDFSRS );
+        for( int i=0; poNetcdf_SRS_PT[i].GDAL_SRS != NULL; i++ ) {
+            if( EQUAL( poNetcdf_SRS_PT[i].GDAL_SRS, pszProjection ) ) {
+        // for(int i=0; poNetcdfSRS[i].netCDFSRS != NULL; i++ ) {
+        //     if( EQUAL( poNetcdfSRS[i].SRS, pszProjection ) ) {
+                CPLDebug( "GDAL_netCDF", "GDAL PROJECTION = %s , NCDF PROJECTION = %s", 
+                          // poNetcdfSRS[i].netCDFSRS);
+                          poNetcdf_SRS_PT[i].GDAL_SRS, 
+                          poNetcdf_SRS_PT[i].NCDF_SRS);
+                printf( "GDAL_netCDF GDAL PROJECTION = %s , NCDF PROJECTION = %s\n", 
+                          poNetcdf_SRS_PT[i].GDAL_SRS, 
+                          poNetcdf_SRS_PT[i].NCDF_SRS);
+                // strcpy( pszNetcdfProjection, poNetcdfSRS[i].netCDFSRS );
+                strcpy( pszNetcdfProjection, poNetcdf_SRS_PT[i].NCDF_SRS );
                 status = nc_def_var( fpImage, 
-                                     poNetcdfSRS[i].netCDFSRS, 
+                                     // poNetcdfSRS[i].netCDFSRS, 
+                                     poNetcdf_SRS_PT[i].NCDF_SRS,
                                      NC_CHAR, 
                                      0, NULL, &NCDFVarID );
                 break;
@@ -2972,7 +2983,6 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
         int anXDims[1];
         anXDims[0] = nXDimID;
         status = nc_def_var( fpImage, NCDF_DIMNAME_X, NC_DOUBLE, 1, anXDims, &NCDFVarID );
-        printf("got status for X %d\n",status);
         nc_put_att_text( fpImage,
                          NCDFVarID,
                          "standard_name",
@@ -2997,7 +3007,6 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
         status = nc_enddef( fpImage );
         status = nc_put_vara_double( fpImage, NCDFVarID, startX,
                                      countX, padXVal);
-        printf("got status %d\n",status);
         status = nc_redef( fpImage );
         
         /* free values */
@@ -3009,7 +3018,6 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
         int anYDims[1];
         anYDims[0] = nYDimID;
         status = nc_def_var( fpImage, NCDF_DIMNAME_Y, NC_DOUBLE, 1, anYDims, &NCDFVarID );
-        printf("got status for Y %d\n",status);
         nc_put_att_text( fpImage,
                          NCDFVarID,
                          "standard_name",
@@ -3034,7 +3042,6 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
         status = nc_enddef( fpImage );
         status = nc_put_vara_double( fpImage, NCDFVarID, startY,
                                      countY, padYVal);
-            printf("got status %d\n",status);
         status = nc_redef( fpImage );
         
         /* free values */
@@ -3156,7 +3163,6 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
             anLatDims[1] = nXDimID;
             status = nc_def_var( fpImage, "lat", eLonLatType, 
                                  2, anLatDims, &NCDFVarID );
-            printf("got status for lat %d\n",status);
         }
         else {
             printf("writing for geog\n");
@@ -3170,19 +3176,16 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                          "standard_name",
                          8,
                          "latitude" );
-        printf("got status  %d\n",status);
         status = nc_put_att_text( fpImage,
                          NCDFVarID,
                          "long_name",
                          8,
                          "latitude" );
-        printf("got status  %d\n",status);
         status = nc_put_att_text( fpImage,
                          NCDFVarID,
                          "units",
                          13,
                          "degrees_north" );
-        printf("got status  %d\n",status);
 
 /* -------------------------------------------------------------------- */
 /*      Write latitude values                                         */
@@ -3190,11 +3193,9 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 
         /* Temporarily switch to data mode and write data */
         status = nc_enddef( fpImage );
-        printf("got status for enddef %d\n",status);
         status = nc_put_vara_double( fpImage, NCDFVarID, startLat,
                                      countLat, padLatVal);
 
-        printf("got status for lat %d\n",status);
         status = nc_redef( fpImage );
         
         /* free values */
@@ -3211,14 +3212,12 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
             anLonDims[1] = nXDimID;
             status = nc_def_var( fpImage, "lon", eLonLatType, 
                                  2, anLonDims, &NCDFVarID );
-            printf("got status for lon %d\n",status);
         }
         else {
             int anLonDims[1];
             anLonDims[0] = nLonDimID;
             status = nc_def_var( fpImage, "lon", eLonLatType, 
                                  1, anLonDims, &NCDFVarID );
-            printf("got status for lon %d\n",status);
         }
         nc_put_att_text( fpImage,
                          NCDFVarID,
@@ -3244,7 +3243,6 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
         status = nc_enddef( fpImage );
         status = nc_put_vara_double( fpImage, NCDFVarID, startLon,
                                     countLon, padLonVal);
-        printf("got status for lon %d\n",status);
         status = nc_redef( fpImage );
         
         /* free values */
@@ -3571,7 +3569,7 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                     7,
                     LONLAT );
             */
-            printf("TMP ET writting proj %s %s\n",GRD_MAPPING,pszNetcdfProjection);
+            // printf("TMP ET writting proj %s %s\n",GRD_MAPPING,pszNetcdfProjection);
             nc_put_att_text( fpImage, NCDFVarID, 
                              GRD_MAPPING,
                              strlen( pszNetcdfProjection ),
@@ -3893,7 +3891,6 @@ void GDALRegister_netCDF()
 //void cdoDefHistory(int fileID, char *histstring)
 void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist)
 {
-    printf("NCDFAddHistory %s [%s]\n",pszAddHist,pszOldHist);
     char strtime[32];
     time_t tp;
     struct tm *ltime;
@@ -3914,8 +3911,6 @@ void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist)
         ltime = localtime(&tp);
         (void) strftime(strtime, sizeof(strtime), "%a %b %d %H:%M:%S %Y: ", ltime);
     }
-
-    printf("strtime: [%s]\n",strtime);
 
     // status = nc_get_att_text( fpImage, NC_GLOBAL, 
     //                           "history", pszOldHist );
