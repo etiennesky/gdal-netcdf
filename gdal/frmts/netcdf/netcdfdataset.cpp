@@ -1,5 +1,5 @@
 /******************************************************************************
- * $Id$
+ * $Id: netcdfdataset.cpp 23197 2011-10-07 00:34:31Z pds $
  *
  * Project:  netCDF read/write Driver
  * Purpose:  GDAL bindings over netCDF library.
@@ -29,8 +29,21 @@
 
 #include "netcdfdataset.h"
 #include "cpl_error.h"
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id: netcdfdataset.cpp 23197 2011-10-07 00:34:31Z pds $");
 
+void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist);
+
+/* PDS: Internal Utility function declarations */
+void NCDFWriteProjAttribs(const OGR_SRSNode *poPROJCS,
+                            const char* pszProjection,
+                            const int fpImage, const int NCDFVarID);
+
+void NCDFWriteProjAttribsFromMappings(const OGR_SRSNode *poPROJCS,
+                                        const oNetcdfSRS_PP mappings[],
+                                        const int fpImage, const int NCDFVarID);
+
+const char* GetProjParamVal(const OGR_SRSNode *poPROJCS, 
+                            const char* findParamStr);
 
 /************************************************************************/
 /* ==================================================================== */
@@ -1004,9 +1017,12 @@ void netCDFDataset::SetProjection( int var )
 
             if( EQUAL( pszValue, TM ) ) {
 
+                // dfScale = 
+                //     poDS->FetchCopyParm( szGridMappingValue, 
+                //                          SCALE_FACTOR_ORIGIN, 1.0 );
                 dfScale = 
                     poDS->FetchCopyParm( szGridMappingValue, 
-                                         SCALE_FACTOR_ORIGIN, 1.0 );
+                                         SCALE_FACTOR_MERIDIAN, 1.0 );
 
                 dfCenterLon = 
                     poDS->FetchCopyParm( szGridMappingValue, 
@@ -1023,6 +1039,14 @@ void netCDFDataset::SetProjection( int var )
                 dfFalseNorthing = 
                     poDS->FetchCopyParm( szGridMappingValue, 
                                          FALSE_NORTHING, 0.0 );
+
+                CPLDebug( "GDAL_netCDF", 
+                          "SetTM( %g, %g, %g, %g, %g)\n",
+                          dfCenterLat, 
+                          dfCenterLon,
+                          dfScale,
+                          dfFalseEasting,
+                          dfFalseNorthing  );
 
                 oSRS.SetTM( dfCenterLat, 
                             dfCenterLon,
@@ -1049,9 +1073,9 @@ void netCDFDataset::SetProjection( int var )
                     poDS->FetchCopyParm( szGridMappingValue, 
                                          LAT_PROJ_ORIGIN, 0.0 );
 
-                dfScale = 
-                    poDS->FetchCopyParm( szGridMappingValue, 
-                                         SCALE_FACTOR, 1.0 );
+                // dfScale = 
+                //     poDS->FetchCopyParm( szGridMappingValue, 
+                //                          SCALE_FACTOR, 1.0 );
 
                 dfFalseEasting = 
                     poDS->FetchCopyParm( szGridMappingValue, 
@@ -1086,6 +1110,28 @@ void netCDFDataset::SetProjection( int var )
                         poDS->FetchCopyParm( szGridMappingValue, 
                                              STD_PARALLEL_2, 0.0 );
                 }
+
+                dfCenterLat = 
+                    poDS->FetchCopyParm( szGridMappingValue, 
+                                         LAT_PROJ_ORIGIN, 0.0 );
+
+                // PDS
+                // Ideas for doing this more cleverly if we had defined
+                //  in a big array
+                //    int* res; = (Allocate to correct length)
+                //for each mapped value
+                /*
+                    //TODO: upgrade this func to handle STD_PARALLEL
+                    //Special cases
+                    val = poDS->FetchCopyParm( szGridMappingValue, 
+                                         mappings[iMap].NCDF_ATT,
+                                         mappings[iMap].defVal );
+                    res[iMap] = val
+                    oSRS.SetACEA( res[0], res[1], res[2], res[3], res[4],
+                        res[5], res[6] );
+                //   clean up res array
+                */                         
+
                 oSRS.SetACEA( dfStdP1, dfStdP2, dfCenterLat, dfCenterLon,
                               dfFalseEasting, dfFalseNorthing );
 
@@ -1225,6 +1271,7 @@ void netCDFDataset::SetProjection( int var )
                     poDS->FetchCopyParm( szGridMappingValue, 
                                          LAT_PROJ_ORIGIN, 0.0 );
 
+                /* this is not CF!!! */
                 dfScale = 
                     poDS->FetchCopyParm( szGridMappingValue, 
                                          SCALE_FACTOR, 1.0 );
@@ -1245,6 +1292,7 @@ void netCDFDataset::SetProjection( int var )
                     if ( CSLCount( papszStdParallels ) == 1 ) {
                         dfStdP1 = CPLAtofM( papszStdParallels[0] );
                         dfStdP2 = dfStdP1;
+                        /* should use dfStdP1 and dfStdP2 instead of dfScale */
                         oSRS.SetLCC1SP( dfCenterLat, dfCenterLon, dfScale, 
                                         dfFalseEasting, dfFalseNorthing );
                     }
@@ -1547,6 +1595,7 @@ void netCDFDataset::SetProjection( int var )
                     yMinMax[0] = dummy[0];
                     yMinMax[1] = dummy[1];
                 }
+                CPLDebug( "GDAL_netCDF", "bBottomUp = %d\n", poDS->bBottomUp );
 
                 /* ----------------------------------------------------------*/
                 /*    Many netcdf files are weather files distributed        */
@@ -1613,6 +1662,7 @@ void netCDFDataset::SetProjection( int var )
 
 /* -------------------------------------------------------------------- */
 /*      Is this a netCDF file created by GDAL?                          */
+/*      NOTE: this should perhaps be skipped if info already found      */
 /* -------------------------------------------------------------------- */
     if( !EQUAL( szGridMappingValue, "" )  ) {
         strcpy( szTemp,szGridMappingValue);
@@ -2412,11 +2462,6 @@ GDALDataset *netCDFDataset::Open( GDALOpenInfo * poOpenInfo )
 
 void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
 
-/* -------------------------------------------------------------------- */
-/*      Add CF-1.x Conventions Global attribute                         */
-/*      Use CF-1.2 for now                                              */
-/*      grid_mapping_name = "latitude_longitude" introduced in 1.2      */ 
-/* -------------------------------------------------------------------- */
     char       **papszMetadata;
     char       **papszFieldData;
     const char *pszField;
@@ -2469,7 +2514,7 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
                     szMetaName[5] = '-';
                 }
                 /* Only copy data without # (previously all data was copied)  */
-                if (  strstr( szMetaName, "#" ) != NULL ) {   
+                if ( strstr( szMetaName, "#" ) != NULL ) {   
                     bCopyItem = FALSE;
                 }
                 /* netCDF attributes do not like the '#' character. */
@@ -2495,33 +2540,34 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
         CSLDestroy( papszFieldData );
     }
 
-    /* Add Conventions and GDAL info at the end */
-    if( CDFVarID == NC_GLOBAL ) {
-
-        papszMetadata = GDALGetMetadata( (GDALDataset *) poDS,"");
-
-        nc_put_att_text( fpImage, 
-                         NC_GLOBAL, 
-                         "Conventions", 
-                         6,
-                         "CF-1.2" ); 
-
-        pszField = GDALVersionInfo("--version");
-        nc_put_att_text( fpImage, 
-                         NC_GLOBAL, 
-                         "GDAL", 
-                         strlen(pszField),
-                         pszField ); 
-    }
-
 }
 
 /************************************************************************/
 /*                             CreateCopy()                             */
 /************************************************************************/
 
+/*
+Driver options:
+
+WRITELONLAT=yes/no (default: yes for geographic, no for projected)
+WRITEGDALTAGS=yes/no (default: no)
+TYPELONLAT=float/double (default: double for geographic, float for projected)
+
+Processing steps:
+
+1 error checking
+2 create dataset
+3 def dims and write metadata
+4 write projection info
+5 write variables: data, projection var, metadata
+6 close dataset
+7 write pam 
+*/
+
+//#include "netcdf-tmp.h"
+
 static GDALDataset*
-NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS, 
+NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS, 
                 int bStrict, char ** papszOptions, 
                 GDALProgressFunc pfnProgress, void * pProgressData )
 
@@ -2529,17 +2575,18 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
     int  nBands = poSrcDS->GetRasterCount();
     int  nXSize = poSrcDS->GetRasterXSize();
     int  nYSize = poSrcDS->GetRasterYSize();
-    int  bProgressive = FALSE;
+    int  nLonSize=0, nLatSize=0; 
     int  iBand;
 
     int  anBandDims[ NC_MAX_DIMS ];
     int  anBandMap[  NC_MAX_DIMS ];
 
-    int    bWriteGeoTransform = FALSE;
-    char  pszNetcdfProjection[ NC_MAX_NAME ];
+    int  bWriteGeoTransform = FALSE;
+    int  bWriteCFLonLat = FALSE;
+    char pszNetcdfProjection[ NC_MAX_NAME ];
+    int bWriteGDALTags = FALSE;
 
-    char   pszXDimName[ MAX_STR_LEN ];
-    char   pszYDimName[ MAX_STR_LEN ];
+    char   szTemp[ MAX_STR_LEN ];
 
     if (nBands == 0)
     {
@@ -2563,18 +2610,16 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
     if( !pfnProgress( 0.0, NULL, pProgressData ) )
         return NULL;
 
-
-    bProgressive = CSLFetchBoolean( papszOptions, "PROGRESSIVE", FALSE );
-
 /* -------------------------------------------------------------------- */
 /*      Get Projection ref for netCDF data CF-1 Convention              */
 /* -------------------------------------------------------------------- */
 
     OGRSpatialReference oSRS;
     char *pszWKT = (char *) poSrcDS->GetProjectionRef();
-
     if( pszWKT != NULL )
         oSRS.importFromWkt( &pszWKT );
+    char *pszProj4Defn = NULL;
+    oSRS.exportToProj4( &pszProj4Defn );
 
 /* -------------------------------------------------------------------- */
 /*      Create the dataset.                                             */
@@ -2584,9 +2629,12 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
     int status;
     int nXDimID = 0;
     int nYDimID = 0;
+    int nLonDimID = 0;
+    int nLatDimID = 0;
     GDALDataType eDT;
+    nc_type eLonLatType = NC_DOUBLE;
     int bBottomUp = FALSE;
-
+    
     status = nc_create( pszFilename, NC_CLOBBER,  &fpImage );
 
     if( status != NC_NOERR )
@@ -2597,76 +2645,405 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         return NULL;
     }
 
-    if( ! oSRS.IsProjected() ) /* If not Projected assume geographic */
+    if( oSRS.IsProjected() ) 
     {
-	strcpy( pszXDimName, "lon" );
-	strcpy( pszYDimName, "lat" );
+        nLonSize = nXSize * nYSize;
+        nLatSize = nXSize * nYSize;
+        status = nc_def_dim( fpImage, NCDF_DIMNAME_X, nXSize, &nXDimID );
+        CPLDebug( "GDAL_netCDF", "status nc_def_dim %s = %d\n", NCDF_DIMNAME_X, status );   
+        status = nc_def_dim( fpImage, NCDF_DIMNAME_Y, nYSize, &nYDimID );
+        CPLDebug( "GDAL_netCDF", "status nc_def_dim %s = %d\n", NCDF_DIMNAME_Y, status );
+        anBandDims[0] = nYDimID;
+        anBandDims[1] = nXDimID;
+        CPLDebug( "GDAL_netCDF", "nYDimID = %d\n", nXDimID );
+        CPLDebug( "GDAL_netCDF", "nXDimID = %d\n", nYDimID );
+
+        /* netcdf standard is bottom-up */
+        // bBottomUp = TRUE;
+        bWriteGeoTransform = TRUE;
+        bWriteCFLonLat = CSLFetchBoolean( papszOptions, "WRITELONLAT", FALSE );
+        bWriteGDALTags = CSLFetchBoolean( papszOptions, "WRITEGDALTAGS", FALSE );
+        eLonLatType = NC_FLOAT;
+        const char *pszValue =  CSLFetchNameValue(papszOptions,"TYPELONLAT");
+        if ( pszValue && EQUAL(pszValue, "DOUBLE" ) ) 
+            eLonLatType = NC_DOUBLE;
     }
     else 
     {
-	strcpy( pszXDimName, "x" ); 
-	strcpy( pszYDimName, "y" );
+        nLonSize = nXSize;
+        nLatSize = nYSize;
+        status = nc_def_dim( fpImage, NCDF_DIMNAME_LON, nLonSize, &nLonDimID );
+        CPLDebug( "GDAL_netCDF", "status nc_def_dim %s = %d\n", NCDF_DIMNAME_LON, status );   
+        status = nc_def_dim( fpImage, NCDF_DIMNAME_LAT, nLatSize, &nLatDimID );
+        CPLDebug( "GDAL_netCDF", "status nc_def_dim %s = %d\n", NCDF_DIMNAME_LAT, status );   
+        anBandDims[0] = nLatDimID;
+        anBandDims[1] = nLonDimID;
+ 
+        bBottomUp = TRUE;       /* netcdf standard is bottom-up */
+        /* files without a Datum will not have a grid_mapping variable and geographic information */
+        if ( oSRS.IsGeographic() )  bWriteGeoTransform = TRUE;
+        else  bWriteGeoTransform = FALSE;
+        bWriteCFLonLat = CSLFetchBoolean( papszOptions, "WRITELONLAT", TRUE );
+        bWriteGDALTags = CSLFetchBoolean( papszOptions, "WRITEGDALTAGS", FALSE );
+        eLonLatType = NC_DOUBLE;
+        const char *pszValue =  CSLFetchNameValue(papszOptions,"TYPELONLAT");
+        if ( pszValue && EQUAL(pszValue, "FLOAT" ) ) 
+            eLonLatType = NC_FLOAT;
     }
-
-    status = nc_def_dim( fpImage, pszXDimName, nXSize, &nXDimID );
-    CPLDebug( "GDAL_netCDF", "status nc_def_dim %s = %d\n", pszXDimName, status );
-    
-    status = nc_def_dim( fpImage, pszYDimName, nYSize, &nYDimID );
-    CPLDebug( "GDAL_netCDF", "status nc_def_dim %s = %d\n", pszYDimName, status );
-    
-    CPLDebug( "GDAL_netCDF", "nYDimID = %d\n", nXDimID );
-    CPLDebug( "GDAL_netCDF", "nXDimID = %d\n", nYDimID );
+   
+    CPLDebug( "GDAL_netCDF", "nLonDimID = %d\n", nXDimID );
+    CPLDebug( "GDAL_netCDF", "nLatDimID = %d\n", nYDimID );
     CPLDebug( "GDAL_netCDF", "nXSize = %d\n", nXSize );
     CPLDebug( "GDAL_netCDF", "nYSize = %d\n", nYSize );
     
+    //    poDstDS->SetGeoTransform( adfGeoTransform );
+
+/* -------------------------------------------------------------------- */
+/*      Copy global metadata                                            */
+/*      Add Conventions, GDAL info and history                          */
+/* -------------------------------------------------------------------- */
     CopyMetadata((void *) poSrcDS, fpImage, NC_GLOBAL );
 
-    // if( oSRS.IsGeographic() ) {
-    /* If not Projected assume Geographic to catch grids without Datum */
-    if( ! oSRS.IsProjected() ) { 
+    nc_put_att_text( fpImage, 
+                     NC_GLOBAL, 
+                     "Conventions", 
+                     strlen(NCDF_CONVENTIONS),
+                     NCDF_CONVENTIONS ); 
+    
+    nc_put_att_text( fpImage, 
+                     NC_GLOBAL, 
+                     "GDAL", 
+                     strlen(NCDF_GDAL),
+                     NCDF_GDAL ); 
+    
+    sprintf( szTemp, "GDAL NCDFCreateCopy( %s, ... )",pszFilename );
+    NCDFAddHistory( fpImage, 
+                    szTemp, 
+                    poSrcDS->GetMetadataItem("NC_GLOBAL#history","") );
 
-        int status;
-        int i;
-        int NCDFVarID=0;
-        
-        double dfNN, dfSN=0.0, dfEE=0.0, dfWE=0.0;
-        double adfGeoTransform[6];
-        char   szGeoTransform[ MAX_STR_LEN ];
-        char   szTemp[ MAX_STR_LEN ];
-        
-        double dfX0=0.0, dfDX=0.0, dfY0=0.0, dfDY=0.0;
-        double dfTemp=0.0;
-        double *pafLonLat  = NULL;
-        int    anLatLonDims[1];
-        size_t startLonLat[1];
-        size_t countLonLat[1];
-	
-        /* netcdf standard is bottom-up */
-        bBottomUp = TRUE;
+    /* Variables needed for both projected and geographic */
+    int NCDFVarID=0;
+ 
+    double adfGeoTransform[6];
+    char   szGeoTransform[ MAX_STR_LEN ];
+
+    double *padLonVal = NULL;
+    double *padLatVal = NULL; /* should use float for projected, save space */
+    double dfX0=0.0, dfDX=0.0, dfY0=0.0, dfDY=0.0;
+    double dfTemp=0.0;
+    size_t *startLon = NULL;
+    size_t *countLon = NULL;
+    size_t *startLat = NULL;
+    size_t *countLat = NULL;
+
 
 /* -------------------------------------------------------------------- */
 /*      Copy GeoTransform array from source                             */
 /* -------------------------------------------------------------------- */
-        poSrcDS->GetGeoTransform( adfGeoTransform );
-        /* files without a Datum will not have Geographics attributes written */
-        if ( oSRS.IsGeographic() ) 
-            bWriteGeoTransform = TRUE;
-        else
-            bWriteGeoTransform = FALSE;
+    poSrcDS->GetGeoTransform( adfGeoTransform );
+    *szGeoTransform = '\0';
+    for( int i=0; i<6; i++ ) {
+        sprintf( szTemp, "%.16g ",
+                 adfGeoTransform[i] );
+        strcat( szGeoTransform, szTemp );
+    }
+    CPLDebug( "GDAL_netCDF", "szGeoTranform = %s", szGeoTransform );
 
-        *szGeoTransform = '\0';
-        for( i=0; i<6; i++ ) {
-            sprintf( szTemp, "%.16g ",
-                     adfGeoTransform[i] );
-            strcat( szGeoTransform, szTemp );
+/* -------------------------------------------------------------------- */
+/*      Get projection values                                           */
+/* -------------------------------------------------------------------- */
+
+    if( oSRS.IsProjected() )
+    {
+        const OGR_SRSNode *poPROJCS = oSRS.GetAttrNode( "PROJCS" );
+        const char  *pszProjection;
+        OGRSpatialReference *poLatLonCRS = NULL;
+        OGRCoordinateTransformation *poTransform = NULL;
+        // const char *pszNetCDFSRS;
+        // double dfNN, dfSN=0.0, dfEE=0.0, dfWE=0.0;
+
+        double *padYVal = NULL;
+        double *padXVal = NULL;
+        size_t startX[1];
+        size_t countX[1];
+        size_t startY[1];
+        size_t countY[1];
+
+        pszProjection = oSRS.GetAttrValue( "PROJECTION" );
+
+/* -------------------------------------------------------------------- */
+/*      Write projection attributes                                     */
+/* -------------------------------------------------------------------- */
+
+        /* Basic Projection info (grid_mapping and datum) */
+        for( int i=0; poNetcdfSRS[i].netCDFSRS != NULL; i++ ) {
+            if( EQUAL( poNetcdfSRS[i].SRS, pszProjection ) ) {
+                CPLDebug( "GDAL_netCDF", "PROJECTION = %s", 
+                          poNetcdfSRS[i].netCDFSRS);
+                strcpy( pszNetcdfProjection, poNetcdfSRS[i].netCDFSRS );
+                status = nc_def_var( fpImage, 
+                                     poNetcdfSRS[i].netCDFSRS, 
+                                     NC_CHAR, 
+                                     0, NULL, &NCDFVarID );
+                break;
+            }
         }
-        CPLDebug( "GDAL_netCDF", "szGeoTranform = %s", szGeoTransform );
+        nc_put_att_text( fpImage, 
+                         NCDFVarID, 
+                         GRD_MAPPING_NAME,
+                         strlen( pszNetcdfProjection ),
+                         pszNetcdfProjection );
+        dfTemp = oSRS.GetSemiMajor();
+        nc_put_att_double( fpImage,
+                           NCDFVarID, 
+                           "semi_major_axis",
+                           NC_DOUBLE,
+                           1,
+                           &dfTemp );
+        dfTemp = oSRS.GetInvFlattening();
+        nc_put_att_double( fpImage,
+                           NCDFVarID, 
+                           "inverse_flattening",
+                           NC_DOUBLE,
+                           1,
+                           &dfTemp );
 
-        dfNN = adfGeoTransform[3];
-        dfSN = ( adfGeoTransform[5] * nYSize ) + dfNN;
-        dfWE = adfGeoTransform[0];
-        dfEE = ( adfGeoTransform[1] * nXSize ) + dfWE;
+        /* Various projection attributes */
+        //PDS: poNetcdfSRS, poPROJCS, pszProjection
+        //PDS: Write these out: separate function due to complexity, need to
+        // keep in synch with SetProjection function
+        NCDFWriteProjAttribs(poPROJCS, pszProjection, fpImage, NCDFVarID);
+        /////////////////
 
+        /*  Optional GDAL custom projection tags */
+        if ( bWriteGDALTags ) {
+            if ( strlen(pszProj4Defn) > 0 ) {
+                nc_put_att_text( fpImage, 
+                                 NCDFVarID, 
+                                 "proj4",
+                                 strlen( pszProj4Defn ),
+                                 pszProj4Defn );
+            }
+            pszWKT = (char *) poSrcDS->GetProjectionRef() ;
+            nc_put_att_text( fpImage, 
+                             NCDFVarID, 
+                             "spatial_ref",
+                             strlen( pszWKT ),
+                             pszWKT );
+            nc_put_att_text( fpImage, 
+                             NCDFVarID, 
+                             "GeoTransform",
+                             strlen( szGeoTransform ),
+                             szGeoTransform );
+        // dfNN = adfGeoTransform[3];
+        // dfSN = ( adfGeoTransform[5] * nYSize ) + dfNN;
+        // dfWE = adfGeoTransform[0];
+        // dfEE = ( adfGeoTransform[1] * nXSize ) + dfWE;   
+        // status = nc_put_att_double( fpImage,
+        //                             NCDFVarID, 
+        //                             "Northernmost_Northing",
+        //                             NC_DOUBLE,
+        //                             1,
+        //                             &dfNN );
+        // status = nc_put_att_double( fpImage,
+        //                             NCDFVarID, 
+        //                             "Southernmost_Northing",
+        //                             NC_DOUBLE,
+        //                             1,
+        //                             &dfSN );
+        // status = nc_put_att_double( fpImage,
+        //                             NCDFVarID,
+        //                             "Easternmost_Easting",
+        //                             NC_DOUBLE,
+        //                             1,
+        //                             &dfEE );
+        // status = nc_put_att_double( fpImage,
+        //                             NCDFVarID,
+        //                             "Westernmost_Easting",
+        //                             NC_DOUBLE,
+        //                             1,
+        //                             &dfWE );
+        }
+
+/* -------------------------------------------------------------------- */
+/*      CF projection X/Y attributes                                    */
+/* -------------------------------------------------------------------- */
+
+        padXVal = (double *) CPLMalloc( nXSize * sizeof( double ) );
+        padYVal = (double *) CPLMalloc( nYSize * sizeof( double ) );
+
+        /* Get OGR transform */
+        if ( bWriteCFLonLat == TRUE ) {
+      
+            poLatLonCRS = oSRS.CloneGeogCS();
+            if ( poLatLonCRS != NULL )
+                poTransform = OGRCreateCoordinateTransformation( &oSRS, poLatLonCRS );
+            if( poTransform != NULL )
+            {
+                // printf("TMP ET got transform\n");
+                padLatVal = (double *) CPLMalloc( nLatSize * sizeof( double ) );
+                padLonVal = (double *) CPLMalloc( nLonSize * sizeof( double ) );
+            }
+            else /* if no OGR transform, then don't write CF lon/lat */
+                bWriteCFLonLat = FALSE;
+        }
+/* -------------------------------------------------------------------- */
+/*      Get Y values                                                    */
+/* -------------------------------------------------------------------- */
+        if ( ! bBottomUp )
+            dfY0 = adfGeoTransform[3];
+        else /* invert latitude values */ 
+            dfY0 = adfGeoTransform[3] + ( adfGeoTransform[5] * nYSize );
+        dfDY = adfGeoTransform[5];
+        
+        for( int j=0; j<nYSize; j++ ) {
+            /* The data point is centered inside the pixel */
+            if ( ! bBottomUp )
+                padYVal[j] = dfY0 + (j+0.5)*dfDY ;
+                //padLatVal[k] = dfY0 + j*dfDY ;
+            else /* invert latitude values */ 
+                padYVal[j] = dfY0 - (j+0.5)*dfDY ;
+                //padLatVal[k] = dfY0 - j*dfDY ;
+            
+             if ( bWriteCFLonLat == TRUE ) {
+                 for( int i=0; i<nXSize; i++ ) {
+                     padLatVal[j*nXSize+i] = padYVal[j];
+                 }
+             }
+        }
+        startX[0] = 0;
+        countX[0] = nXSize;
+        if ( bWriteCFLonLat == TRUE ) {
+            startLat = (size_t *) CPLMalloc( 2 * sizeof( size_t ) );
+            countLat = (size_t *) CPLMalloc( 2 * sizeof( size_t ) );
+            startLat[0] = 0;
+            startLat[1] = 0;
+            countLat[0] = nYSize;
+            countLat[1] = nXSize;
+        }
+/* -------------------------------------------------------------------- */
+/*      Get X values                                                    */
+/* -------------------------------------------------------------------- */
+        dfX0 = adfGeoTransform[0];
+        dfDX = adfGeoTransform[1];
+
+        for( int i=0; i<nXSize; i++ ) {
+            /* The data point is centered inside the pixel */
+            padXVal[i] = dfX0 + (i+0.5)*dfDX ;
+            if ( bWriteCFLonLat == TRUE ) {
+                for( int j=0; j<nYSize; j++ ) {
+                    padLonVal[j*nXSize+i] = padXVal[i];
+                    // padLonVal[k] = dfX0 + i*dfDX ;
+                }
+            }
+        }
+        startY[0] = 0;
+        countY[0] = nYSize;
+        if ( bWriteCFLonLat == TRUE ) {
+            startLon = (size_t *) CPLMalloc( 2 * sizeof( size_t ) );
+            countLon = (size_t *) CPLMalloc( 2 * sizeof( size_t ) );
+            startLon[0] = 0;
+            startLon[1] = 0;
+            countLon[0] = nYSize;
+            countLon[1] = nXSize;
+        }
+/* -------------------------------------------------------------------- */
+/*      Transform (X,Y) values to (lon,lat)                             */
+/* -------------------------------------------------------------------- */
+
+        // for( int i=0; i<nXSize*nYSize; i++ ) {
+        //     printf("%f ",padLonVal[i]);
+        // }
+        if ( bWriteCFLonLat == TRUE ) {
+            if( ! poTransform->Transform( nXSize * nYSize, padLonVal, padLatVal, NULL ) ) {
+                CPLError( CE_Failure, CPLE_AppDefined, 
+                          "Unable to Transform (X,Y) to (lon,lat).\n" );
+            }
+        }
+
+        /* Free the srs and transform objects */
+        if ( poLatLonCRS != NULL ) CPLFree( poLatLonCRS );
+        if ( poTransform != NULL ) CPLFree( poTransform );
+
+
+/* -------------------------------------------------------------------- */
+/*      Write X attributes                                              */
+/* -------------------------------------------------------------------- */
+        int anXDims[1];
+        anXDims[0] = nXDimID;
+        status = nc_def_var( fpImage, NCDF_DIMNAME_X, NC_DOUBLE, 1, anXDims, &NCDFVarID );
+        printf("got status for X %d\n",status);
+        nc_put_att_text( fpImage,
+                         NCDFVarID,
+                         "standard_name",
+                         strlen("projection_x_coordinate"),
+                         "projection_x_coordinate" );
+        nc_put_att_text( fpImage,
+                         NCDFVarID,
+                         "long_name",
+                         strlen("x coordinate of projection"),
+                         "x coordinate of projection" );
+        nc_put_att_text( fpImage,
+                         NCDFVarID,
+                         "units",
+                         1,
+                         "m" ); /*verify this */
+
+/* -------------------------------------------------------------------- */
+/*      Write X values                                                  */
+/* -------------------------------------------------------------------- */
+
+        /* Temporarily switch to data mode and write data */
+        status = nc_enddef( fpImage );
+        status = nc_put_vara_double( fpImage, NCDFVarID, startX,
+                                     countX, padXVal);
+        printf("got status %d\n",status);
+        status = nc_redef( fpImage );
+        
+        /* free values */
+        CPLFree( padXVal );
+
+/* -------------------------------------------------------------------- */
+/*      Write Y attributes                                              */
+/* -------------------------------------------------------------------- */
+        int anYDims[1];
+        anYDims[0] = nYDimID;
+        status = nc_def_var( fpImage, NCDF_DIMNAME_Y, NC_DOUBLE, 1, anYDims, &NCDFVarID );
+        printf("got status for Y %d\n",status);
+        nc_put_att_text( fpImage,
+                         NCDFVarID,
+                         "standard_name",
+                         strlen("projection_y_coordinate"),
+                         "projection_y_coordinate" );
+        nc_put_att_text( fpImage,
+                         NCDFVarID,
+                         "long_name",
+                         strlen("y coordinate of projection"),
+                         "y coordinate of projection" );
+        nc_put_att_text( fpImage,
+                         NCDFVarID,
+                         "units",
+                         1,
+                         "m" ); /*verify this */
+
+/* -------------------------------------------------------------------- */
+/*      Write Y values                                         */
+/* -------------------------------------------------------------------- */
+
+        /* Temporarily switch to data mode and write data */
+        status = nc_enddef( fpImage );
+        status = nc_put_vara_double( fpImage, NCDFVarID, startY,
+                                     countY, padYVal);
+            printf("got status %d\n",status);
+        status = nc_redef( fpImage );
+        
+        /* free values */
+        CPLFree( padYVal );
+
+    } // projected
+
+    else  {  /* If not Projected assume Geographic to catch grids without Datum */
+        	
 /* -------------------------------------------------------------------- */
 /*      Write CF-1.x compliant Geographics attributes                   */
 /*      Note: WKT information will not be preserved (e.g. WGS84)        */
@@ -2676,7 +3053,6 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         
         if( bWriteGeoTransform == TRUE ) 
  	    {
-
             strcpy( pszNetcdfProjection, "crs" );
             nc_def_var( fpImage, 
                         pszNetcdfProjection, 
@@ -2721,29 +3097,9 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
             //                  szGeoTransform );
         }
 
-/* -------------------------------------------------------------------- */
-/*      Write latitude attributes                                       */
-/* -------------------------------------------------------------------- */
-        anLatLonDims[0] = nYDimID;
-        status = nc_def_var( fpImage, "lat", NC_DOUBLE, 1, anLatLonDims, &NCDFVarID );
-        nc_put_att_text( fpImage,
-                         NCDFVarID,
-                         "standard_name",
-                         8,
-                         "latitude" );
-        nc_put_att_text( fpImage,
-                         NCDFVarID,
-                         "long_name",
-                         8,
-                         "latitude" );
-        nc_put_att_text( fpImage,
-                         NCDFVarID,
-                         "units",
-                         13,
-                         "degrees_north" );
 
 /* -------------------------------------------------------------------- */
-/*      Write latitude values                                           */
+/*      Get latitude values                                             */
 /* -------------------------------------------------------------------- */
         if ( ! bBottomUp )
             dfY0 = adfGeoTransform[3];
@@ -2751,31 +3107,119 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
             dfY0 = adfGeoTransform[3] + ( adfGeoTransform[5] * nYSize );
         dfDY = adfGeoTransform[5];
         
-        pafLonLat = (double *) CPLMalloc( nYSize * sizeof( double ) );
-        for( i=0; i<nYSize; i++ ) {
+        padLatVal = (double *) CPLMalloc( nYSize * sizeof( double ) );
+        for( int i=0; i<nYSize; i++ ) {
             /* The data point is centered inside the pixel */
             if ( ! bBottomUp )
-                pafLonLat[i] = dfY0 + (i+0.5)*dfDY ;
+                padLatVal[i] = dfY0 + (i+0.5)*dfDY ;
             else /* invert latitude values */ 
-                pafLonLat[i] = dfY0 - (i+0.5)*dfDY ;
+                padLatVal[i] = dfY0 - (i+0.5)*dfDY ;
         }
         
-        startLonLat[0] = 0;
-        countLonLat[0] = nYSize;
+        startLat = (size_t *) CPLMalloc( sizeof( size_t ) );
+        countLat = (size_t *) CPLMalloc( sizeof( size_t ) );
+        startLat[0] = 0;
+        countLat[0] = nYSize;
+                
+/* -------------------------------------------------------------------- */
+/*      Get longitude values                                            */
+/* -------------------------------------------------------------------- */
+        dfX0 = adfGeoTransform[0];
+        dfDX = adfGeoTransform[1];
         
+        padLonVal = (double *) CPLMalloc( nXSize * sizeof( double ) );
+        for( int i=0; i<nXSize; i++ ) {
+            /* The data point is centered inside the pixel */
+            padLonVal[i] = dfX0 + (i+0.5)*dfDX ;
+        }
+        
+        startLon = (size_t *) CPLMalloc( sizeof( size_t ) );
+        countLon = (size_t *) CPLMalloc( sizeof( size_t ) );
+        startLon[0] = 0;
+        countLon[0] = nXSize;
+        
+    }// not projected
+    
+
+/* -------------------------------------------------------------------- */
+/*      Write CF projection lat/lon attributes                          */
+/* -------------------------------------------------------------------- */
+    if ( bWriteCFLonLat ) {
+
+/* -------------------------------------------------------------------- */
+/*      Write latitude attributes                                     */
+/* -------------------------------------------------------------------- */
+        if ( oSRS.IsProjected() ) {
+            printf("writing for proj\n");
+            int anLatDims[2];
+            anLatDims[0] = nYDimID;
+            anLatDims[1] = nXDimID;
+            status = nc_def_var( fpImage, "lat", eLonLatType, 
+                                 2, anLatDims, &NCDFVarID );
+            printf("got status for lat %d\n",status);
+        }
+        else {
+            printf("writing for geog\n");
+            int anLatDims[1];
+            anLatDims[0] = nLatDimID;
+            status = nc_def_var( fpImage, "lat", eLonLatType, 
+                                 1, anLatDims, &NCDFVarID );                  
+        }
+        status=nc_put_att_text( fpImage,
+                         NCDFVarID,
+                         "standard_name",
+                         8,
+                         "latitude" );
+        printf("got status  %d\n",status);
+        status = nc_put_att_text( fpImage,
+                         NCDFVarID,
+                         "long_name",
+                         8,
+                         "latitude" );
+        printf("got status  %d\n",status);
+        status = nc_put_att_text( fpImage,
+                         NCDFVarID,
+                         "units",
+                         13,
+                         "degrees_north" );
+        printf("got status  %d\n",status);
+
+/* -------------------------------------------------------------------- */
+/*      Write latitude values                                         */
+/* -------------------------------------------------------------------- */
+
         /* Temporarily switch to data mode and write data */
         status = nc_enddef( fpImage );
-        status = nc_put_vara_double( fpImage, NCDFVarID, startLonLat,
-                                     countLonLat, pafLonLat);
+        printf("got status for enddef %d\n",status);
+        status = nc_put_vara_double( fpImage, NCDFVarID, startLat,
+                                     countLat, padLatVal);
+
+        printf("got status for lat %d\n",status);
         status = nc_redef( fpImage );
         
+        /* free values */
+        CPLFree( padLatVal );  
+        CPLFree( startLat );
+        CPLFree( countLat );
         
 /* -------------------------------------------------------------------- */
-/*      Write longitude attributes                                      */
+/*      Write longitude attributes                                    */
 /* -------------------------------------------------------------------- */
-        anLatLonDims[0] = nXDimID;
-        status = nc_def_var( fpImage, "lon", NC_DOUBLE,
-                             1, anLatLonDims, &NCDFVarID );
+        if ( oSRS.IsProjected() ) {
+            int anLonDims[2];
+            anLonDims[0] = nYDimID;
+            anLonDims[1] = nXDimID;
+            status = nc_def_var( fpImage, "lon", eLonLatType, 
+                                 2, anLonDims, &NCDFVarID );
+            printf("got status for lon %d\n",status);
+        }
+        else {
+            int anLonDims[1];
+            anLonDims[0] = nLonDimID;
+            status = nc_def_var( fpImage, "lon", eLonLatType, 
+                                 1, anLonDims, &NCDFVarID );
+            printf("got status for lon %d\n",status);
+        }
         nc_put_att_text( fpImage,
                          NCDFVarID,
                          "standard_name",
@@ -2793,165 +3237,22 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                          "degrees_east" );
         
 /* -------------------------------------------------------------------- */
-/*      Write longitude values                                          */	
+/*      Write longitude values                                        */	
 /* -------------------------------------------------------------------- */
-        dfX0 = adfGeoTransform[0];
-        dfDX = adfGeoTransform[1];
-        
-        pafLonLat = (double *) CPLRealloc( pafLonLat, nXSize * sizeof( double ) );
-        for( i=0; i<nXSize; i++ ) {
-            /* The data point is centered inside the pixel */
-            pafLonLat[i] = dfX0 + (i+0.5)*dfDX ;
-        }
-        
-        startLonLat[0] = 0;
-        countLonLat[0] = nXSize;
         
         /* Temporarily switch to data mode and write data */
         status = nc_enddef( fpImage );
-        status = nc_put_vara_double( fpImage, NCDFVarID, startLonLat,
-                                     countLonLat, pafLonLat);
+        status = nc_put_vara_double( fpImage, NCDFVarID, startLon,
+                                    countLon, padLonVal);
+        printf("got status for lon %d\n",status);
         status = nc_redef( fpImage );
         
-        /* free lonlat values */
-        CPLFree( pafLonLat );
-    }
-    
-    //if( oSRS.IsProjected() )
-    else /* Projected */ 
-    {
-        const char *pszParamStr, *pszParamVal;
-        const OGR_SRSNode *poPROJCS = oSRS.GetAttrNode( "PROJCS" );
-        int status;
-        int i;
-        int NCDFVarID;
-        const char  *pszProjection;
-        double dfNN=0.0;
-        double dfSN=0.0;
-        double dfEE=0.0;
-        double dfWE=0.0;
-        double adfGeoTransform[6];
-        char   szGeoTransform[ MAX_STR_LEN ];
-        char   szTemp[ MAX_STR_LEN ];
-
-        /* netcdf standard is bottom-up, but leave it top first for now */
-        bBottomUp = FALSE;
-
-        poSrcDS->GetGeoTransform( adfGeoTransform );
-        
-        *szGeoTransform = '\0';
-        for( i=0; i<6; i++ ) {
-            sprintf( szTemp, "%.16g ",
-                     adfGeoTransform[i] );
-            strcat( szGeoTransform, szTemp );
-        }
-
-        CPLDebug( "GDAL_netCDF", "szGeoTranform = %s", szGeoTransform );
-
-        pszProjection = oSRS.GetAttrValue( "PROJECTION" );
-        bWriteGeoTransform = TRUE;
-
-        for(i=0; poNetcdfSRS[i].netCDFSRS != NULL; i++ ) {
-            if( EQUAL( poNetcdfSRS[i].SRS, pszProjection ) ) {
-                CPLDebug( "GDAL_netCDF", "PROJECTION = %s", 
-                          poNetcdfSRS[i].netCDFSRS);
-                strcpy( pszNetcdfProjection, poNetcdfSRS[i].netCDFSRS );
-
-                break;
-            }
-        }
-        
-        status = nc_def_var( fpImage, 
-                             poNetcdfSRS[i].netCDFSRS, 
-                             NC_CHAR, 
-                             0, NULL, &NCDFVarID );
-        
-        dfNN = adfGeoTransform[3];
-        dfSN = ( adfGeoTransform[5] * nYSize ) + dfNN;
-        dfWE = adfGeoTransform[0];
-        dfEE = ( adfGeoTransform[1] * nXSize ) + dfWE;
-        
-        status = nc_put_att_double( fpImage,
-                                    NCDFVarID, 
-                                    "Northernmost_Northing",
-                                    NC_DOUBLE,
-                                    1,
-                                    &dfNN );
-        status = nc_put_att_double( fpImage,
-                                    NCDFVarID, 
-                                    "Southernmost_Northing",
-                                    NC_DOUBLE,
-                                    1,
-                                    &dfSN );
-        status = nc_put_att_double( fpImage,
-                                    NCDFVarID,
-                                    "Easternmost_Easting",
-                                    NC_DOUBLE,
-                                    1,
-                                    &dfEE );
-        status = nc_put_att_double( fpImage,
-                                    NCDFVarID,
-                                    "Westernmost_Easting",
-                                    NC_DOUBLE,
-                                    1,
-                                    &dfWE );
-        pszWKT = (char *) poSrcDS->GetProjectionRef() ;
-        nc_put_att_text( fpImage, 
-                         NCDFVarID, 
-                         "spatial_ref",
-                         strlen( pszWKT ),
-                         pszWKT );
-        nc_put_att_text( fpImage, 
-                         NCDFVarID, 
-                         "GeoTransform",
-                         strlen( szGeoTransform ),
-                         szGeoTransform );
-        nc_put_att_text( fpImage, 
-                         NCDFVarID, 
-                         GRD_MAPPING_NAME,
-                         strlen( pszNetcdfProjection ),
-                         pszNetcdfProjection );
-
-        for( int iChild = 0; iChild < poPROJCS->GetChildCount(); iChild++ )
-        {
-            const OGR_SRSNode    *poNode;
-            float fValue;
-
-            poNode = poPROJCS->GetChild( iChild );
-            if( !EQUAL(poNode->GetValue(),"PARAMETER") 
-                || poNode->GetChildCount() != 2 )
-                continue;
-
-/* -------------------------------------------------------------------- */
-/*      Look for projection attributes                                  */
-/* -------------------------------------------------------------------- */
-            pszParamStr = poNode->GetChild(0)->GetValue();
-            pszParamVal = poNode->GetChild(1)->GetValue();
-	    
-
-            for(i=0; poNetcdfSRS[i].netCDFSRS != NULL; i++ ) {
-                if( EQUAL( poNetcdfSRS[i].SRS, pszParamStr ) ) {
-                    CPLDebug( "GDAL_netCDF", "%s = %s", 
-                              poNetcdfSRS[i].netCDFSRS, 
-                              pszParamVal );
-                    break;
-                }
-            }
-/* -------------------------------------------------------------------- */
-/*      Write Projection attribute                                      */
-/* -------------------------------------------------------------------- */
-            sscanf( pszParamVal, "%f", &fValue );
-            if( poNetcdfSRS[i].netCDFSRS != NULL ) {
-                nc_put_att_float( fpImage, 
-                                  NCDFVarID, 
-                                  poNetcdfSRS[i].netCDFSRS, 
-                                  NC_FLOAT,
-                                  1,
-                                  &fValue );
-
-            }	
-        }
-    }
+        /* free values */
+        CPLFree( padLonVal );  
+        CPLFree( startLon );
+        CPLFree( countLon );
+ 
+    } // bWriteCFLonLat
 
 /* -------------------------------------------------------------------- */
 /*      Initialize Band Map                                             */
@@ -3011,8 +3312,6 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 /* -------------------------------------------------------------------- */
  
         eDT = poSrcDS->GetRasterBand(i)->GetRasterDataType();
-        anBandDims[0] = nYDimID;
-        anBandDims[1] = nXDimID;
         CPLErr      eErr = CE_None;
 
         dfNoDataValue = poSrcBand->GetNoDataValue(0);
@@ -3252,21 +3551,6 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         }
 	
 /* -------------------------------------------------------------------- */
-/*      Write Projection for band                                       */
-/* -------------------------------------------------------------------- */
-        if( bWriteGeoTransform == TRUE ) {
-            /*	    nc_put_att_text( fpImage, NCDFVarID, 
-                    COORDINATES,
-                    7,
-                    LONLAT );
-            */
-            nc_put_att_text( fpImage, NCDFVarID, 
-                             GRD_MAPPING,
-                             strlen( pszNetcdfProjection ),
-                             pszNetcdfProjection );
-        }
-
-/* -------------------------------------------------------------------- */
 /*      Copy Metadata for band                                          */
 /* -------------------------------------------------------------------- */
 
@@ -3277,17 +3561,41 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                          szLongName );
 
         CopyMetadata( (void *) hBand, fpImage, NCDFVarID );
+
+/* -------------------------------------------------------------------- */
+/*      Write Projection for band                                       */
+/* -------------------------------------------------------------------- */
+        if( bWriteGeoTransform == TRUE ) {
+            /*	    nc_put_att_text( fpImage, NCDFVarID, 
+                    COORDINATES,
+                    7,
+                    LONLAT );
+            */
+            printf("TMP ET writting proj %s %s\n",GRD_MAPPING,pszNetcdfProjection);
+            nc_put_att_text( fpImage, NCDFVarID, 
+                             GRD_MAPPING,
+                             strlen( pszNetcdfProjection ),
+                             pszNetcdfProjection );
+            if ( bWriteCFLonLat ) {
+                nc_put_att_text( fpImage, NCDFVarID, 
+                                 COORDINATES,
+                                 strlen( LONLAT ),
+                                 LONLAT );
+            }           
+        }
+
     }
 
-    //    poDstDS->SetGeoTransform( adfGeoTransform );
+
 
 
 /* -------------------------------------------------------------------- */
 /*      Cleanup and close.                                              */
 /* -------------------------------------------------------------------- */
 //    CPLFree( pabScanline );
+nc_close( fpImage );
+CPLFree(pszProj4Defn );
 
-    nc_close( fpImage );
 /* -------------------------------------------------------------------- */
 /*      Re-open dataset, and copy any auxilary pam information.         */
 /* -------------------------------------------------------------------- */
@@ -3297,6 +3605,256 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         poDS->CloneInfo( poSrcDS, GCIF_PAM_DEFAULT );
 
     return poDS;
+}
+
+/* PDS */
+/* Write any needed projection attributes *
+ * poPROJCS: ptr to proj crd system
+ * pszProjection: name of projection system in GDAL WKT
+ * fpImage: open NetCDF file in writing mode
+ * NCDFVarID: NetCDF Var Id of proj system we're writing in to
+ *
+ * Note: Default behaviour for each projection is just to choose the
+ *  appropriate mappings, then call std function that knows how to
+ *  write these.
+ *
+ * However, flexibility exists so that custom code can be written e.g.
+ *  if any params need pre-processing in future to transform (i.e.
+ *  the straight mappings approach is too simplistic).
+ */
+void NCDFWriteProjAttribs(const OGR_SRSNode *poPROJCS,
+                            const char* pszProjection,
+                            const int fpImage, const int NCDFVarID) 
+{
+    const char *pszParamStr, *pszParamVal;
+    double dfStdP[2];
+    int bFoundStdP1=FALSE,bFoundStdP2=FALSE;
+    double dfTemp=0.0;
+
+    if( EQUAL(pszProjection, SRS_PT_ALBERS_CONIC_EQUAL_AREA) ) {
+        NCDFWriteProjAttribsFromMappings(poPROJCS, poAEAMappings, fpImage,
+            NCDFVarID);
+    }
+    else if( EQUAL(pszProjection, SRS_PT_AZIMUTHAL_EQUIDISTANT) ) {
+        NCDFWriteProjAttribsFromMappings(poPROJCS, poLAZEQMappings, fpImage,
+            NCDFVarID);
+    }
+    else if( EQUAL(pszProjection, SRS_PT_LAMBERT_AZIMUTHAL_EQUAL_AREA ) ) {
+        NCDFWriteProjAttribsFromMappings(poPROJCS, poLAZEQMappings, fpImage,
+            NCDFVarID);
+    }
+    else if( EQUAL(pszProjection, SRS_PT_LAMBERT_CONFORMAL_CONIC_1SP ) ) {
+        NCDFWriteProjAttribsFromMappings(poPROJCS, poLC_1SPMappings, fpImage,
+            NCDFVarID);
+    }
+    else if( EQUAL(pszProjection, SRS_PT_LAMBERT_CONFORMAL_CONIC_2SP ) ) {
+        NCDFWriteProjAttribsFromMappings(poPROJCS, poLC_2SPMappings, fpImage,
+            NCDFVarID);
+    }
+    else if( EQUAL(pszProjection, SRS_PT_CYLINDRICAL_EQUAL_AREA ) ) {
+        NCDFWriteProjAttribsFromMappings(poPROJCS, poLCEAMappings, fpImage,
+            NCDFVarID);
+    }
+    else if( EQUAL(pszProjection, SRS_PT_MERCATOR_1SP) ) {
+        NCDFWriteProjAttribsFromMappings(poPROJCS, poM_1SPMappings, fpImage,
+            NCDFVarID);
+    }        
+    else if( EQUAL(pszProjection, SRS_PT_MERCATOR_2SP) ) {
+        NCDFWriteProjAttribsFromMappings(poPROJCS, poM_2SPMappings, fpImage,
+            NCDFVarID);
+    }
+    else if( EQUAL(pszProjection, SRS_PT_ORTHOGRAPHIC) ) {
+        NCDFWriteProjAttribsFromMappings(poPROJCS, poOrthoMappings, fpImage,
+            NCDFVarID);
+    }
+    else if( EQUAL(pszProjection, SRS_PT_POLAR_STEREOGRAPHIC) ) {
+        // TODO: CF-1 says 'standard_parallel' may replace scale factor
+        // TODO: In CF-1, LAT_PROJ_ORIGIN is either +90 or -90. Not sure
+        //   how this maps to OGC stuff?
+        //  eg do we have to check LAT_PROJ_ORIGIN is +90 or -90?
+        //  Or in this case, is "std_parallel" in CF-1 really the same as
+        //   LAT_OF_ORIGIN in WKT, and we fill in LAT_OF_ORIGIN with +90 or 
+        //   -90? (LAT_PROJ_ORIGIN set to 90 if STD_PARALLEL > 0, else -90)
+        const oNetcdfSRS_PP mappings[] = {
+            {LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN},
+            {VERT_LONG_FROM_POLE, SRS_PP_CENTRAL_MERIDIAN},
+            {SCALE_FACTOR_ORIGIN, SRS_PP_SCALE_FACTOR},  
+            // STD_PARALLEL_1 ?
+            {FALSE_EASTING, SRS_PP_FALSE_EASTING },  
+            {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
+            {NULL, NULL}
+            };
+            
+        NCDFWriteProjAttribsFromMappings(poPROJCS, mappings, fpImage,
+            NCDFVarID);
+    }      
+    // Rotated Pole: not implemented yet, unsure GDAL supports
+    // Currently map Oblique steregraphic to stereographic
+    else if( EQUAL(pszProjection, SRS_PT_OBLIQUE_STEREOGRAPHIC) ) {
+        NCDFWriteProjAttribsFromMappings(poPROJCS, poStMappings, fpImage,
+            NCDFVarID);
+    }
+    else if( EQUAL(pszProjection, SRS_PT_STEREOGRAPHIC) ) {
+        NCDFWriteProjAttribsFromMappings(poPROJCS, poStMappings, fpImage,
+            NCDFVarID);
+    }
+    else if( EQUAL(pszProjection, SRS_PT_TRANSVERSE_MERCATOR ) ) {
+        NCDFWriteProjAttribsFromMappings(poPROJCS, poTMMappings, fpImage,
+            NCDFVarID);
+    }
+    else {
+        //PDS: PREVIOUS DEFAULT BEHAVIOUR
+        for( int iChild = 0; iChild < poPROJCS->GetChildCount(); iChild++ )
+        {
+            const OGR_SRSNode *poNode;
+            
+            poNode = poPROJCS->GetChild( iChild );
+            if( !EQUAL(poNode->GetValue(),"PARAMETER") 
+                || poNode->GetChildCount() != 2 )
+                continue;
+
+            pszParamStr = poNode->GetChild(0)->GetValue();
+            pszParamVal = poNode->GetChild(1)->GetValue();
+        
+            // pszNetCDFSRS = NULL;
+            /* Find a better way to store and search these values */
+            for(int i=0; poNetcdfSRS[i].netCDFSRS != NULL; i++ ) {
+                if( EQUAL( poNetcdfSRS[i].SRS, pszParamStr ) ) {
+                    CPLDebug( "GDAL_netCDF", "%s = %s", 
+                              poNetcdfSRS[i].netCDFSRS, 
+                              pszParamVal );
+                    // pszNetCDFSRS = poNetcdfSRS[i].netCDFSRS;
+                    // sscanf( pszParamVal, "%f", &dfValue );
+                    // nc_put_att_float( fpImage, 
+                    //                   NCDFVarID, 
+                    //                   poNetcdfSRS[i].netCDFSRS,
+                    //                   NC_FLOAT,
+                    //                   1,
+                    //                   &fValue );
+
+                    /* Read STD_PARALLEL attribute */
+                    if( EQUAL( poNetcdfSRS[i].SRS, SRS_PP_STANDARD_PARALLEL_1 ) )  {
+                        bFoundStdP1 = TRUE;
+                        sscanf( pszParamVal, "%lg", &dfStdP[0] );
+                    }
+                    else if( EQUAL( poNetcdfSRS[i].SRS, SRS_PP_STANDARD_PARALLEL_2 ) )   {
+                        bFoundStdP2 = TRUE;
+                        sscanf( pszParamVal, "%lg", &dfStdP[1] );
+                    } 
+                    /* Write attribute */ 
+                    else {
+                        dfTemp = atof( pszParamVal );
+                        nc_put_att_double( fpImage, 
+                                           NCDFVarID, 
+                                           poNetcdfSRS[i].netCDFSRS,
+                                           NC_DOUBLE,
+                                           1,
+                                           &dfTemp );
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    /* Write STD_PARALLEL attribute: special case */
+    if ( bFoundStdP1 )  { 
+        /* one value or equal values */
+        if ( !bFoundStdP2 || dfStdP[0] ==  dfStdP[1] ) {
+            nc_put_att_double( fpImage, 
+                               NCDFVarID, 
+                               STD_PARALLEL, 
+                               NC_DOUBLE,
+                               1,
+                               &dfStdP[0] );
+        }
+        else { /* two values */
+            nc_put_att_double( fpImage, 
+                               NCDFVarID, 
+                               STD_PARALLEL, 
+                               NC_DOUBLE,
+                               2,
+                               dfStdP );
+        }
+    }
+}
+
+void NCDFWriteProjAttribsFromMappings(const OGR_SRSNode *poPROJCS,
+                                        const oNetcdfSRS_PP mappings[],
+                                        const int fpImage, const int NCDFVarID) 
+{                            
+    double dfStdP[2];
+    int bFoundStdP1=FALSE,bFoundStdP2=FALSE;
+    double dfTemp=0.0;
+    const char *pszParamVal;
+
+    for (int iMap = 0; mappings[iMap].GDAL_ATT != NULL; iMap++ ) {
+        pszParamVal = GetProjParamVal(poPROJCS, mappings[iMap].GDAL_ATT);
+        //Write param to NetCDF
+        // include handling of std_parallel special case: this gets 
+        // written at very end
+        if( EQUAL(mappings[iMap].GDAL_ATT, SRS_PP_STANDARD_PARALLEL_1 ) ) {
+            bFoundStdP1 = TRUE;
+            sscanf( pszParamVal, "%lg", &dfStdP[0] );
+        }
+        else if( EQUAL(mappings[iMap].GDAL_ATT, SRS_PP_STANDARD_PARALLEL_2 ) ) { 
+            bFoundStdP2 = TRUE;
+            sscanf( pszParamVal, "%lg", &dfStdP[1] );
+        } 
+        else {
+            dfTemp = atof( pszParamVal );
+            nc_put_att_double( fpImage, 
+                               NCDFVarID, 
+                               mappings[iMap].NCDF_ATT,
+                               NC_FLOAT,
+                               1,
+                               &dfTemp );
+        }
+    }
+    /* Now handle the STD_PARALLEL attrib special case */
+    if ( bFoundStdP1 ) { 
+        /* one value or equal values */
+        if ( !bFoundStdP2 || dfStdP[0] ==  dfStdP[1] ) {
+            nc_put_att_double( fpImage, 
+                               NCDFVarID, 
+                               STD_PARALLEL, 
+                               NC_DOUBLE,
+                               1,
+                               &dfStdP[0] );
+        }
+        else { /* two values */
+            nc_put_att_double( fpImage, 
+                               NCDFVarID, 
+                               STD_PARALLEL, 
+                               NC_DOUBLE,
+                               2,
+                               dfStdP );
+        }
+    }
+}
+
+// PDS
+/* Helper function to get the value of a parameter of a projection in
+ * a GDAL poPROJCS structure */
+const char* GetProjParamVal(const OGR_SRSNode *poPROJCS, 
+                            const char* findParamStr)
+{
+    const char *pszParamStr, *pszParamVal;
+
+    for( int iChild = 0; iChild < poPROJCS->GetChildCount(); iChild++ )
+            for( int iChild = 0; iChild < poPROJCS->GetChildCount(); iChild++ )
+    {
+        const OGR_SRSNode *poNode;
+        
+        poNode = poPROJCS->GetChild( iChild );
+        if( !EQUAL(poNode->GetValue(),"PARAMETER") 
+            || poNode->GetChildCount() != 2 )
+            continue;
+
+        pszParamStr = poNode->GetChild(0)->GetValue();
+        pszParamVal = poNode->GetChild(1)->GetValue();
+        if( EQUAL( pszParamStr, findParamStr ) ) break;
+    }
+    return pszParamVal;
 }
 
 /************************************************************************/
@@ -3323,13 +3881,64 @@ void GDALRegister_netCDF()
         poDriver->SetMetadataItem( GDAL_DMD_EXTENSION, "nc" );
 
         poDriver->pfnOpen = netCDFDataset::Open;
-        poDriver->pfnCreateCopy = NCDFCreateCopy;
+        // poDriver->pfnCreateCopy = NCDFCreateCopy;
+        poDriver->pfnCreateCopy = NCDFCreateCopy2;
         poDriver->pfnIdentify = netCDFDataset::Identify;
 
         GetGDALDriverManager( )->RegisterDriver( poDriver );
     }
 }
 
+/* code taken from cdo and libcdi, used for writing the history attribute */
+//void cdoDefHistory(int fileID, char *histstring)
+void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist)
+{
+    printf("NCDFAddHistory %s [%s]\n",pszAddHist,pszOldHist);
+    char strtime[32];
+    time_t tp;
+    struct tm *ltime;
+
+    char *pszNewHist = NULL;
+    size_t nNewHistSize = 0;
+    int disableHistory = FALSE;
+
+    /* Check pszOldHist - as if there was no previous history, it will be
+       a null pointer - if so set as empty. */
+    if (NULL == pszOldHist) {
+        pszOldHist = "";
+    }
+
+    tp = time(NULL);
+    if ( tp != -1 )
+    {
+        ltime = localtime(&tp);
+        (void) strftime(strtime, sizeof(strtime), "%a %b %d %H:%M:%S %Y: ", ltime);
+    }
+
+    printf("strtime: [%s]\n",strtime);
+
+    // status = nc_get_att_text( fpImage, NC_GLOBAL, 
+    //                           "history", pszOldHist );
+    // printf("status: %d pszOldHist: [%s]\n",status,pszOldHist);
+    
+    nNewHistSize = strlen(pszOldHist)+strlen(strtime)+strlen(pszAddHist)+2;
+    pszNewHist = (char *) CPLMalloc(nNewHistSize * sizeof(char));
+    
+    strcpy(pszNewHist, strtime);
+    strcat(pszNewHist, pszAddHist);
+
+    if ( disableHistory == FALSE && pszNewHist )
+    {
+        strcat(pszNewHist, "\n");
+        strcat(pszNewHist, pszOldHist);
+    }
+
+    nc_put_att_text( fpImage, NC_GLOBAL, 
+                     "history", nNewHistSize,
+                     pszNewHist ); 
+  
+    CPLFree(pszNewHist);
+}
 
 
 /* -------------------------------------------------------------------- */
@@ -3407,8 +4016,7 @@ void GDALRegister_netCDF()
 //    * either standard_parallel or scale_factor_at_projection_origin
 //    * false_easting
 //    * false_northing
-//Orthographic
-//
+//Orthographic//
 //grid_mapping_name = orthographic
 //
 //Map parameters:
