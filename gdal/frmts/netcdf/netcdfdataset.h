@@ -113,8 +113,9 @@
 #define NCDF_DIMNAME_Y "y"
 #define NCDF_DIMNAME_LON "lon"
 #define NCDF_DIMNAME_LAT "lat"
-#define NCDF_CONVENTIONS "CF-1.5"
+#define NCDF_CONVENTIONS_CF "CF-1.5"
 #define NCDF_GDAL GDALVersionInfo("--version")
+#define NCDF_SPATIAL_REF "spatial_ref"
 
 #define NCDF_
 
