@@ -726,7 +726,8 @@ netCDFDataset::netCDFDataset()
     bGotGeoTransform = FALSE;
     pszProjection    = NULL;
     cdfid            = 0;
-    bBottomUp        = FALSE;
+    // bBottomUp        = FALSE;
+    bBottomUp        = TRUE;
     nFileType        = NCDF_FILETYPE_NONE;
 }
 
@@ -851,6 +852,8 @@ void netCDFDataset::SetProjection( int var )
     int          bGotGeogCS = FALSE;
     int          bGotCfSRS = FALSE;
     int          bGotGdalSRS = FALSE;
+    int          bIsGdalFile = FALSE; /* was this file created by GDAL? */
+    int          bIsGdalCfFile = FALSE; /* is this GDAL file really CF compliant? */
 
     OGRSpatialReference oSRS;
     int          nVarDimXID = -1;
@@ -1608,7 +1611,11 @@ void netCDFDataset::SetProjection( int var )
 
                 /* Check for Bottom-up for all files (not just CF) */
                 /* Also, don't check for dimname "lon" or "y", because CF doesn't specify valid dimnames */
-                if ( pdfYCoord[0] < pdfYCoord[1] )
+                // if ( pdfYCoord[0] < pdfYCoord[1] )
+                //     poDS->bBottomUp = TRUE;
+                if ( pdfYCoord[0] > pdfYCoord[1] )
+                    poDS->bBottomUp = FALSE;
+                else 
                     poDS->bBottomUp = TRUE;
 
                 /* Check for reverse order of y-coordinate */
@@ -1618,7 +1625,6 @@ void netCDFDataset::SetProjection( int var )
                     yMinMax[0] = dummy[0];
                     yMinMax[1] = dummy[1];
                 }
-                CPLDebug( "GDAL_netCDF", "bBottomUp = %d\n", poDS->bBottomUp );
 
                 /* ----------------------------------------------------------*/
                 /*    Many netcdf files are weather files distributed        */
@@ -1672,10 +1678,6 @@ void netCDFDataset::SetProjection( int var )
                     poDS->adfGeoTransform[0] -= (poDS->adfGeoTransform[1] / 2);
                     poDS->adfGeoTransform[3] -= (poDS->adfGeoTransform[5] / 2);
                 }
-
-                oSRS.exportToWkt( &(poDS->pszProjection) );
-                // oSRS.exportToPrettyWkt( &(poDS->pszProjection) );
-		    
             } 
         }
 
@@ -1683,33 +1685,59 @@ void netCDFDataset::SetProjection( int var )
         CPLFree( pdfYCoord );
     }
 
+/* -------------------------------------------------------------------- */
+/*     Set the WKT for this dataset if we got it from CF                */
+/* -------------------------------------------------------------------- */
+    if ( bGotCfSRS ) {
+        oSRS.exportToWkt( &(poDS->pszProjection) );
+        // oSRS.exportToPrettyWkt( &(poDS->pszProjection) );
+        CPLDebug( "GDAL_netCDF", "set WKT from CF [%s]\n", poDS->pszProjection );
+        if ( !bGotGeoTransform )  
+            CPLError(CE_Warning, 1,"WARNING: got SRS but not geotransform from CF!");
+    }
 
 /* -------------------------------------------------------------------- */
-/*      Is this a netCDF file created by GDAL?                          */
-/*      NOTE: this should perhaps be skipped if info already found      */
+/*      Process custom GDAL values (spatial_ref, GeoTransform)          */
 /* -------------------------------------------------------------------- */
     if( !EQUAL( szGridMappingValue, "" )  ) {
+
+        CPLDebug( "GDAL_netCDF", "got grid_mapping %s\n", szGridMappingValue );
         strcpy( szTemp,szGridMappingValue);
         strcat( szTemp, "#" );
         strcat( szTemp, NCDF_SPATIAL_REF);
         pszWKT = CSLFetchNameValue(poDS->papszMetadata, szTemp);
 	
         if( pszWKT != NULL ) {
+
+            bIsGdalFile = TRUE;
+            /* Is this file created by the newer (CF-conformant) driver? */
+            /* primitive method, could use something like svn revision# or GDAL version */
+            pszValue = CSLFetchNameValue(poDS->papszMetadata, "NC_GLOBAL#GDAL");
+            if( pszValue ) bIsGdalCfFile = TRUE;
+            else bIsGdalCfFile = FALSE;
+
+            CPLDebug( "GDAL_netCDF", "bIsGdalFile=%d, bIsGdalCfFile=%d\n", 
+                      bIsGdalFile, bIsGdalCfFile );
 	    
 /* -------------------------------------------------------------------- */
 /*      Compare CRS obtained from CF attributes and GDAL WKT            */
 /*      If possible use the more complete GDAL WKT                      */
 /* -------------------------------------------------------------------- */
            // pszProjectionGDAL = CPLStrdup( pszWKT );
-            if ( ! bGotCfSRS ) {   
+            /* Set the CRS to the one written by GDAL */
+            if ( ! bGotCfSRS || poDS->pszProjection == NULL || ! bIsGdalCfFile ) {   
                 bGotGdalSRS = TRUE;
-                poDS->pszProjection = CPLStrdup( pszWKT );
+                poDS->pszProjection = CPLStrdup( pszWKT ); 
+                CPLDebug( "GDAL_netCDF", "set WKT from GDAL [%s]\n", poDS->pszProjection );
             }
             else { /* use the SRS from GDAL if it doesn't conflict with the one from CF */
+                CPLDebug( "GDAL_netCDF", 
+                          "comparing WKT: \nCF=[%s]\nGDAL=[%s]\n",  
+                          (poDS->pszProjection), pszWKT );
                 char *pszProjectionGDAL = CPLStrdup( pszWKT );
                 OGRSpatialReference oSRSGDAL;
                 oSRSGDAL.importFromWkt( &pszProjectionGDAL );
-                /* set datum to unknown, bug #4281 */
+                /* set datum to unknown or else datums will not match, see bug #4281 */
                 if ( oSRSGDAL.GetAttrNode( "DATUM" ) )
                     oSRSGDAL.GetAttrNode( "DATUM" )->GetChild(0)->SetValue( "unknown" );
                 if ( oSRS.IsSame(&oSRSGDAL) ) {
@@ -1735,7 +1763,6 @@ void netCDFDataset::SetProjection( int var )
             pszGeoTransform = CSLFetchNameValue(poDS->papszMetadata, szTemp);	    
 
             if( pszGeoTransform != NULL ) {
-                CPLDebug( "GDAL_netCDF", "looking for geotransform, got %s\n", pszGeoTransform );
                 papszGeoTransform = CSLTokenizeString2( pszGeoTransform,
                                                         " ", 
                                                         CSLT_HONOURSTRINGS );
@@ -1752,7 +1779,8 @@ void netCDFDataset::SetProjection( int var )
 /* -------------------------------------------------------------------- */
             } else {
                 double dfNN=0.0, dfSN=0.0, dfEE=0.0, dfWE=0.0;
-                CPLDebug( "GDAL_netCDF", "looking for geotransform values\n" );
+                int bGotNN=FALSE, bGotSN=FALSE, bGotEE=FALSE, bGotWE=FALSE;
+                CPLDebug( "GDAL_netCDF", "looking for geotransform corners\n" );
                 strcpy(szTemp,szGridMappingValue);
                 strcat( szTemp, "#" );
                 strcat( szTemp, "Northernmost_Northing");
@@ -1760,6 +1788,7 @@ void netCDFDataset::SetProjection( int var )
 		
                 if( pszValue != NULL ) {
                     dfNN = atof( pszValue );
+                    bGotNN = TRUE;
                 }
                 strcpy(szTemp,szGridMappingValue);
                 strcat( szTemp, "#" );
@@ -1768,6 +1797,7 @@ void netCDFDataset::SetProjection( int var )
 		
                 if( pszValue != NULL ) {
                     dfSN = atof( pszValue );
+                    bGotSN = TRUE;
                 }
 		
                 strcpy(szTemp,szGridMappingValue);
@@ -1777,6 +1807,7 @@ void netCDFDataset::SetProjection( int var )
 		
                 if( pszValue != NULL ) {
                     dfEE = atof( pszValue );
+                    bGotEE = TRUE;
                 }
 		
                 strcpy(szTemp,szGridMappingValue);
@@ -1785,9 +1816,13 @@ void netCDFDataset::SetProjection( int var )
                 pszValue = CSLFetchNameValue(poDS->papszMetadata, szTemp);
 		
                 if( pszValue != NULL ) {
-                    dfWE = atof( pszValue );
+                    dfWE = atof( pszValue ); 
+                    bGotWE = TRUE;
                 }
-		
+
+                /* Only set the GeoTransform if we got all the values */
+                if (  bGotNN && bGotSN && bGotEE && bGotWE ) {
+                // if (  1 ) {
                 adfGeoTransform[0] = dfWE;
                 adfGeoTransform[1] = (dfEE - dfWE) / 
                     ( poDS->GetRasterXSize() - 1 );
@@ -1805,13 +1840,40 @@ void netCDFDataset::SetProjection( int var )
                 adfGeoTransform[3] = dfNN
                     - (adfGeoTransform[5] / 2);
 
-
                 bGotGeoTransform = TRUE;
-            }
+                }
+            } // (pszGeoTransform != NULL)
             CSLDestroy( papszGeoTransform );
+
+            /* If we got a GeoTransform from GDAL (not from CF), we are */
+            /* probably reading a file written with an older version of */
+            /* the driver, so assume bBottomUp=FALSE */
+            if ( bGotGeoTransform ) poDS->bBottomUp = FALSE;
+            else {
+                CPLError(CE_Warning, 1,"WARNING: got SRS but not geotransform from GDAL!");
             }
+            } // (!bGotGeoTransform)
         }
     }
+
+/* -------------------------------------------------------------------- */
+/*     Check for bottom-up                                              */
+/* -------------------------------------------------------------------- */
+ 
+    if ( bGotGeoTransform ) {
+        CPLDebug( "GDAL_netCDF", "Got GeoTransform:" 
+                  "  %.16g, %.16g, %.16g"
+                  "  %.16g, %.16g, %.16g\n", 
+                  adfGeoTransform[0],
+                  adfGeoTransform[1],
+                  adfGeoTransform[2],
+                  adfGeoTransform[3],
+                  adfGeoTransform[4],
+                  adfGeoTransform[5] );
+        // if ( pdfYCoord[0] > pdfYCoord[1] )
+        //     poDS->bBottomUp = FALSE;
+    }
+    CPLDebug( "GDAL_netCDF", "bBottomUp = %d\n", poDS->bBottomUp );
     
 /* -------------------------------------------------------------------- */
 /*     Search for Well-known GeogCS if only got CF WKT                  */
@@ -4008,7 +4070,8 @@ void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist)
 
     if ( disableHistory == FALSE && pszNewHist )
     {
-        strcat(pszNewHist, "\n");
+        if ( ! EQUAL(pszOldHist,"") )
+            strcat(pszNewHist, "\n");
         strcat(pszNewHist, pszOldHist);
     }
 
