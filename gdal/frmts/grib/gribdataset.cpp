@@ -330,6 +330,9 @@ void GRIBRasterBand::ReadGribData( DataSource & fp, sInt4 start, int subgNum, do
 
     IS_Init (&is);
 
+    const char* pszGribNormalizeUnits = CPLGetConfigOption("GRIB_NORMALIZE_UNITS", NULL);
+    if ( pszGribNormalizeUnits != NULL && ( STRCASECMP(pszGribNormalizeUnits,"NO")==0 ) )
+        f_unit = 0; /* do not normalize units to metric */
 
     /* Read GRIB message from file position "start". */
     fp.DataSourceFseek(start, SEEK_SET);
@@ -717,10 +720,19 @@ void GRIBDataset::SetGribMetaData(grib_MetaData* meta)
         rMinX = meta->gds.lon1; // longitude in degrees, to be transformed to meters (or degrees in case of latlon)
         rMaxY = meta->gds.lat1; // latitude in degrees, to be transformed to meters 
 
+        double rMinY = meta->gds.lat2;
         if (meta->gds.lat2 > rMaxY)
+        {
           rMaxY = meta->gds.lat2;
-        rPixelSizeX = meta->gds.Dx;
-        rPixelSizeY = meta->gds.Dy;
+          rMinY = meta->gds.lat1;
+        }
+
+        if (meta->gds.lon1 > meta->gds.lon2)
+          rPixelSizeX = (360.0 - (meta->gds.lon1 - meta->gds.lon2)) / meta->gds.Nx;
+        else
+          rPixelSizeX = (meta->gds.lon2 - meta->gds.lon1) / meta->gds.Nx;
+
+        rPixelSizeY = (rMaxY - rMinY) / meta->gds.Ny;
     }
 
     adfGeoTransform[0] = rMinX;

@@ -154,7 +154,7 @@ be influenced by other configuration options.
 Control what debugging messages are emitted.  A value of <i>ON</i> will
 enable all debug messages.  A value of <i>OFF</i> will disable all debug
 messages.  Another value will select only debug messages containing that
-string in the debug prefix code. 
+string in the debug prefix code.  
 </dd>
 
 <dt> <b>--help-general</b></dt><dd>
@@ -180,7 +180,7 @@ lists information about a raster dataset
 
 \verbatim
 gdalinfo [--help-general] [-mm] [-stats] [-hist] [-nogcp] [-nomd]
-         [-noct] [-nofl] [-checksum] [-mdd domain]*
+         [-noct] [-nofl] [-checksum] [-proj4] [-mdd domain]*
 	 [-sd subdataset] datasetname
 \endverbatim
 
@@ -207,6 +207,7 @@ file list.</dd>
 dataset contains several subdatasets read and display a subdataset with
 specified number (starting from 1). This is an alternative of giving the full
 subdataset name.</dd>
+<dt> <b>-proj4</b></dt><dd> (GDAL >= 1.9.0) Report a PROJ.4 string corresponding to the file's coordinate system.</dd>
 </dl>
 
 The gdalinfo will report all of the following (if known):

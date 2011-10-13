@@ -208,6 +208,10 @@ class CPL_DLL OGRDataSource
     OGRErr              ProcessSQLCreateIndex( const char * );
     OGRErr              ProcessSQLDropIndex( const char * );
     OGRErr              ProcessSQLDropTable( const char * );
+    OGRErr              ProcessSQLAlterTableAddColumn( const char * );
+    OGRErr              ProcessSQLAlterTableDropColumn( const char * );
+    OGRErr              ProcessSQLAlterTableAlterColumn( const char * );
+    OGRErr              ProcessSQLAlterTableRenameColumn( const char * );
 
     OGRStyleTable      *m_poStyleTable;
     int                 m_nRefCount;
@@ -369,6 +373,7 @@ void CPL_DLL RegisterOGRSVG();
 void CPL_DLL RegisterOGRCouchDB();
 void CPL_DLL RegisterOGRIdrisi();
 void CPL_DLL RegisterOGRARCGEN();
+void CPL_DLL RegisterOGRSEGUKOOA();
 CPL_C_END
 
 
