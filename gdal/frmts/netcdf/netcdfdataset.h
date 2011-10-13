@@ -338,11 +338,6 @@ static const oNetcdfSRS_PP poPSmappings[] = {
 //  seems to rule out.
 
 // Stereographic
-// TODO: Issues of how GDAL handles STEREOGRAPHIC vs OBLIQUE_STEREOGRAPHIC
-// (GDAL seems to create Oblique_stereographic when you request stereographic
-//   using Proj4, not entirely sure they're different projections)
-//  Haven't been able to create a GDAL regular Stereographic to test yet.
-// ET - PDS removed this comment, why?
 static const oNetcdfSRS_PP poStMappings[] = {
     {LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN},
     {LON_PROJ_ORIGIN, SRS_PP_CENTRAL_MERIDIAN},
@@ -387,27 +382,23 @@ static const oNetcdfSRS_PT poNetcdfSRS_PT[] = {
     {"hotine_oblique_mercator_2P", 
      SRS_PT_HOTINE_OBLIQUE_MERCATOR_TWO_POINT_NATURAL_ORIGIN},
     {"laborde_oblique_mercator", SRS_PT_LABORDE_OBLIQUE_MERCATOR, NULL },
-    /* {"lambert_conformal_conic1", SRS_PT_LAMBERT_CONFORMAL_CONIC_1SP }, */
     {"lambert_conformal_conic", SRS_PT_LAMBERT_CONFORMAL_CONIC_1SP, poLC1SPMappings },
     {"lambert_conformal_conic", SRS_PT_LAMBERT_CONFORMAL_CONIC_2SP, poLC2SPMappings },
-    {"lambert_azimuthal_equal_area", SRS_PT_LAMBERT_AZIMUTHAL_EQUAL_AREA, poLCEAMappings },
+    {"lambert_azimuthal_equal_area", SRS_PT_LAMBERT_AZIMUTHAL_EQUAL_AREA, poLAZEQMappings },
     /* {"mercator_1sp", SRS_PT_MERCATOR_1SP }, */
     /* {"mercator_2sp", SRS_PT_MERCATOR_2SP }, */
     {"mercator", SRS_PT_MERCATOR_1SP, poM1SPMappings },
-    {"mercator", SRS_PT_MERCATOR_2SP, poM1SPMappings },
+    {"mercator", SRS_PT_MERCATOR_2SP, poM2SPMappings },
     {"miller_cylindrical", SRS_PT_MILLER_CYLINDRICAL, NULL },
     {"mollweide", SRS_PT_MOLLWEIDE, NULL },
     {"new_zealand_map_grid", SRS_PT_NEW_ZEALAND_MAP_GRID, NULL },
-    //PDS: GDAL seems to currently treat oblique_stereographic same as stereographic
-    //PDS In NetCDF export: removed the mapping from ObliqueStereographic? to Stereographic:- as this was a GeoTiff? specific issue, not GDAL-wide (See #4267).
-    //{"oblique_stereographic", SRS_PT_OBLIQUE_STEREOGRAPHIC, NULL }, 
-    {STEREO, SRS_PT_OBLIQUE_STEREOGRAPHIC, poStMappings }, 
+    {"oblique_stereographic", SRS_PT_OBLIQUE_STEREOGRAPHIC, NULL }, 
     {"orthographic", SRS_PT_ORTHOGRAPHIC, poOrthoMappings },
     {POLAR_STEREO, SRS_PT_POLAR_STEREOGRAPHIC, poPSmappings },
     {"polyconic", SRS_PT_POLYCONIC, NULL },
     {"robinson", SRS_PT_ROBINSON, NULL }, 
     {"sinusoidal", SRS_PT_SINUSOIDAL, NULL },  
-    {STEREO, SRS_PT_STEREOGRAPHIC, poTMMappings },
+    {STEREO, SRS_PT_STEREOGRAPHIC, poStMappings },
     {"swiss_oblique_cylindrical", SRS_PT_SWISS_OBLIQUE_CYLINDRICAL, NULL },
     {"transverse_mercator", SRS_PT_TRANSVERSE_MERCATOR, poTMMappings },
     /* {"transverse_mercator", SRS_PT_TRANSVERSE_MERCATOR, NULL }, //just a test */
