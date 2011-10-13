@@ -31,21 +31,35 @@
 #include "cpl_error.h"
 CPL_CVSID("$Id: netcdfdataset.cpp 23197 2011-10-07 00:34:31Z pds $");
 
+#include <map>
+
+/* Internal function declarations */
+
 void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist);
 
-/* PDS: Internal Utility function declarations */
 void NCDFWriteProjAttribs(const OGR_SRSNode *poPROJCS,
                             const char* pszProjection,
                             const int fpImage, const int NCDFVarID);
 
-// void NCDFWriteProjAttribsFromMappings(const OGR_SRSNode *poPROJCS,
-//                                         const oNetcdfSRS_PP mappings[],
-//                                         const int fpImage, const int NCDFVarID);
-
-const char* GetProjParamVal(const OGR_SRSNode *poPROJCS, 
-                            const char* findParamStr);
 
 /************************************************************************/
+/*                         MISC Notes                                   */
+/************************************************************************/
+/* Various bug fixed:
+
+- bottom-up by default
+- fix projected export+import CF
+
+*/
+
+/* Various bugs that need fixing:
+
+- support import of unequally-spaced grids
+- support of lon/lat grids from CF grids which are not supported
+
+*/
+
+
 /* ==================================================================== */
 /*                         netCDFRasterBand                             */
 /* ==================================================================== */
@@ -125,29 +139,6 @@ CPLErr netCDFRasterBand::SetScale( double dfNewScale )
     dfScale = dfNewScale; 
     return CE_None; 
 } 
-
-/************************************************************************/
-/*                            GetMetadata()                             */
-/************************************************************************/
-char **netCDFDataset::GetMetadata( const char *pszDomain )
-{
-    if( pszDomain != NULL && EQUALN( pszDomain, "SUBDATASETS", 11 ) )
-        return papszSubDatasets;
-    else
-        return GDALDataset::GetMetadata( pszDomain );
-}
-
-/************************************************************************/
-/*                          GetProjectionRef()                          */
-/************************************************************************/
-
-const char * netCDFDataset::GetProjectionRef()
-{
-    if( bGotGeoTransform )
-        return pszProjection;
-    else
-        return GDALPamDataset::GetProjectionRef();
-}
 
 /************************************************************************/
 /*                           GetNoDataValue()                           */
@@ -541,7 +532,7 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
         }
         status = nc_get_att_double( poDS->cdfid, nZId, 
                                     szNoValueName, &dfNoData );
-	
+        
     } else {
         switch( vartype ) {
             case NC_BYTE:
@@ -748,6 +739,29 @@ netCDFDataset::~netCDFDataset()
 
     if( cdfid ) 
         nc_close( cdfid );
+}
+
+/************************************************************************/
+/*                            GetMetadata()                             */
+/************************************************************************/
+char **netCDFDataset::GetMetadata( const char *pszDomain )
+{
+    if( pszDomain != NULL && EQUALN( pszDomain, "SUBDATASETS", 11 ) )
+        return papszSubDatasets;
+    else
+        return GDALDataset::GetMetadata( pszDomain );
+}
+
+/************************************************************************/
+/*                          GetProjectionRef()                          */
+/************************************************************************/
+
+const char * netCDFDataset::GetProjectionRef()
+{
+    if( bGotGeoTransform )
+        return pszProjection;
+    else
+        return GDALPamDataset::GetProjectionRef();
 }
 
 /************************************************************************/
@@ -1535,7 +1549,7 @@ void netCDFDataset::SetProjection( int var )
             ( abs( nSpacingMiddle ) ==  abs( nSpacingLast )     ) ) {
 
 /* -------------------------------------------------------------------- */
-/*      Longitude is equaly spaced, check lattitde                      */
+/*      Longitude is equally spaced, check latitude                     */
 /* -------------------------------------------------------------------- */
             nSpacingBegin   = (int) poDS->rint((pdfYCoord[1]-pdfYCoord[0]) * 
                                                1000); 
@@ -1550,7 +1564,7 @@ void netCDFDataset::SetProjection( int var )
 
 		    
 /* -------------------------------------------------------------------- */
-/*   For Latitude  we allow an error of 0.1 degrees for gaussion        */
+/*   For Latitude  we allow an error of 0.1 degrees for gaussian        */
 /*   gridding                                                           */
 /* -------------------------------------------------------------------- */
 
@@ -1679,12 +1693,20 @@ void netCDFDataset::SetProjection( int var )
                     poDS->adfGeoTransform[0] -= (poDS->adfGeoTransform[1] / 2);
                     poDS->adfGeoTransform[3] -= (poDS->adfGeoTransform[5] / 2);
                 }
-            } 
+            }// end if (Latitude is equally spaced, within 0.1 degrees)
+            else {
+                CPLDebug( "GDAL_netCDF", 
+                          "Latitude is not equally spaced.\n" );
+            }
+        }// end if (Longitude is equally spaced)
+        else {
+            CPLDebug( "GDAL_netCDF", 
+                      "Longitude is not equally spaced.\n" );
         }
 
         CPLFree( pdfXCoord );
         CPLFree( pdfYCoord );
-    }
+    }// end if (has dims)
 
     CPLDebug( "GDAL_netCDF", 
               "bGotGeogCS=%d bGotCfSRS=%d bGotGeoTransform=%d\n\n",
@@ -2742,7 +2764,6 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
     char pszNetcdfProjection[ NC_MAX_NAME ];
 
     const char *pszValue;
-
     char   szTemp[ MAX_STR_LEN ];
 
     if (nBands == 0)
@@ -2946,16 +2967,11 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
         /* Basic Projection info (grid_mapping and datum) */
         for( int i=0; poNetcdfSRS_PT[i].GDAL_SRS != NULL; i++ ) {
             if( EQUAL( poNetcdfSRS_PT[i].GDAL_SRS, pszProjection ) ) {
-        // for(int i=0; poNetcdfSRS[i].netCDFSRS != NULL; i++ ) {
-        //     if( EQUAL( poNetcdfSRS[i].SRS, pszProjection ) ) {
                 CPLDebug( "GDAL_netCDF", "GDAL PROJECTION = %s , NCDF PROJECTION = %s", 
-                          // poNetcdfSRS[i].netCDFSRS);
                           poNetcdfSRS_PT[i].GDAL_SRS, 
                           poNetcdfSRS_PT[i].NCDF_SRS);
-                // strcpy( pszNetcdfProjection, poNetcdfSRS[i].netCDFSRS );
                 strcpy( pszNetcdfProjection, poNetcdfSRS_PT[i].NCDF_SRS );
                 status = nc_def_var( fpImage, 
-                                     // poNetcdfSRS[i].netCDFSRS, 
                                      poNetcdfSRS_PT[i].NCDF_SRS,
                                      NC_CHAR, 
                                      0, NULL, &NCDFVarID );
@@ -3471,6 +3487,7 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 /* -------------------------------------------------------------------- */
  
         eDT = poSrcDS->GetRasterBand(i)->GetRasterDataType();
+
         CPLErr      eErr = CE_None;
 
         dfNoDataValue = poSrcBand->GetNoDataValue(0);
@@ -3487,6 +3504,7 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 /* -------------------------------------------------------------------- */
 
             pabScanline = (GByte *) CPLMalloc( nBands * nXSize );
+            
             for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
 
 /* -------------------------------------------------------------------- */
@@ -3554,6 +3572,7 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                               NC_SHORT,
                               1,
                               &nsNoDataValue );
+
             for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
 
                 eErr = poSrcBand->RasterIO( GF_Read, 0, iLine, nXSize, 1, 
@@ -3794,21 +3813,22 @@ void NCDFWriteProjAttribs( const OGR_SRSNode *poPROJCS,
 {                            
     double dfStdP[2];
     int bFoundStdP1=FALSE,bFoundStdP2=FALSE;
-    // double dfTemp=0.0;
+    double dfValue=0.0;
     const char *pszParamStr, *pszParamVal;
+    const std::string *pszNCDFAtt, *pszGDALAtt;
     static const oNetcdfSRS_PP *poMap = NULL;
     int nMapIndex = -1;
 
-    /* mapping vectors to save mapped values which will be written */
-    /* note - could use CPLStrinList for more consistency */
-    // std::vector< const char * > vszNCDFAtt;
-    // std::vector< const char * > vszGDALAtt;
-    // std::vector< double > vdVal;
-    CPLStringList oNCDFAttList;
-    CPLStringList oGDALAttList;
-    std::vector< double > oValList;
-    //CPLStringList oValList;
-
+    //Attribute <GDAL,NCDF> and Value <NCDF,value> mappings
+    std::map< std::string, std::string > oAttMap;
+    std::map< std::string, std::string >::iterator oAttIter;
+    std::map< std::string, double > oValMap;
+    std::map< std::string, double >::iterator oValIter;
+    //results to write
+    std::vector< std::pair<std::string,double> > oOutList;
+ 
+    //TMP ET 
+    //pszProjection = "bla";
 
     /* Find the appropriate mapping */
     for (int iMap = 0; poNetcdfSRS_PT[iMap].GDAL_SRS != NULL; iMap++ ) {
@@ -3824,11 +3844,15 @@ void NCDFWriteProjAttribs( const OGR_SRSNode *poPROJCS,
 
     //ET TODO if projection name is not found, should behave differently (needs testing)
     if ( nMapIndex == -1 ) {
-        printf("WARNING! projection name %s note found in the lookup tables!!!",pszProjection);
+        CPLError( CE_Warning, CPLE_AppDefined, 
+                  "WARNING! projection name %s note found in the lookup tables!!!",
+                  pszProjection);
     }
     /* if no mapping was found or assigned, set the generic one */
     if ( !poMap ) {
-        printf("WARNING! projection name %s in not part of the CF standard, will not be supported by CF!",pszProjection);
+        CPLError( CE_Warning, CPLE_AppDefined, 
+                  "WARNING! projection name %s in not part of the CF standard, will not be supported by CF!",
+                  pszProjection);
         poMap = poGenericMappings;
     }
 
@@ -3836,111 +3860,103 @@ void NCDFWriteProjAttribs( const OGR_SRSNode *poPROJCS,
         CPLDebug( "GDAL_netCDF","attribute map: %s %s\n",
                   poMap[i].NCDF_ATT,poMap[i].GDAL_ATT);
     }
-  
+
+    /* initialize local map objects */
+    for ( int iMap = 0; poMap[iMap].GDAL_ATT != NULL; iMap++ ) {
+        oAttMap[poMap[iMap].GDAL_ATT] = poMap[iMap].NCDF_ATT;
+    }
+    // for ( oAttIter = oAttMap.begin(); oAttIter != oAttMap.end(); oAttIter++ )
+    //     printf ("GDAL ATT=[%s] NCDF ATT=[%s]\n",(oAttIter->first).c_str(),(oAttIter->second).c_str());
+
+    for( int iChild = 0; iChild < poPROJCS->GetChildCount(); iChild++ ) {
+
+        const OGR_SRSNode *poNode;
+
+        poNode = poPROJCS->GetChild( iChild );
+        if( !EQUAL(poNode->GetValue(),"PARAMETER") 
+            || poNode->GetChildCount() != 2 )
+            continue;
+        pszParamStr = poNode->GetChild(0)->GetValue();
+        pszParamVal = poNode->GetChild(1)->GetValue();
+
+        // printf("Inserting %s %f\n",pszParamStr,atof(pszParamVal));
+        oValMap[pszParamStr] = atof(pszParamVal);
+    }
+    // for ( oValIter = oValMap.begin(); oValIter != oValMap.end(); oValIter++ )
+    //     printf ("GDAL ATT=[%s] value=[%f]\n",(oValIter->first).c_str(),(oValIter->second));
+
     /* Lookup mappings and fill vectors */
     /* The code is duplicated for lack of a generic algorithm */
     /* (must switch the order of the for statements). */
     if ( poMap != poGenericMappings ) { /* specific mapping, loop over mapping values */
 
-        for ( int iMap = 0; poMap[iMap].GDAL_ATT != NULL; iMap++ ) {
+        for ( oAttIter = oAttMap.begin(); oAttIter != oAttMap.end(); oAttIter++ ) {
 
-      // for( int iChild = 0; iChild < poPROJCS->GetChildCount(); iChild++ )
-           // pszParamVal = GetProjParamVal(poPROJCS, poMap[iMap].GDAL_ATT);
-            for( int iChild = 0; iChild < poPROJCS->GetChildCount(); iChild++ ) {
+            pszGDALAtt = &(oAttIter->first);
+            pszNCDFAtt = &(oAttIter->second);
+            oValIter = oValMap.find( *pszGDALAtt );
 
-                const OGR_SRSNode *poNode;
+            if ( oValIter != oValMap.end() ) {
+
+                dfValue = oValIter->second;
+                oOutList.push_back( std::make_pair( *pszNCDFAtt, dfValue ) );
                 
-                poNode = poPROJCS->GetChild( iChild );
-                if( !EQUAL(poNode->GetValue(),"PARAMETER") 
-                    || poNode->GetChildCount() != 2 )
-                    continue;
-                
-                pszParamStr = poNode->GetChild(0)->GetValue();
-                pszParamVal = poNode->GetChild(1)->GetValue();
-
-            // for( int iChild = 0; iChild < poPROJCS->GetChildCount(); iChild++ ) {
-                if( EQUAL( poMap[iMap].GDAL_ATT, pszParamStr ) ) {
-                    // vszNCDFAtt.push_back( poMap[iMap].NCDF_ATT );
-                    // vszGDALAtt.push_back( poMap[iMap].GDAL_ATT );
-                    oNCDFAttList.AddString( poMap[iMap].NCDF_ATT );
-                    oGDALAttList.AddString( poMap[iMap].GDAL_ATT );
-                    oValList.push_back( atof(pszParamVal) ); 
-
-                    /* special case for PS grid */
-                    if ( EQUAL( SRS_PP_LATITUDE_OF_ORIGIN, pszParamStr ) &&
-                         EQUAL(pszProjection, SRS_PT_POLAR_STEREOGRAPHIC) ) {
-                        double dfLatPole = 0.0;
-                        double dfLatNatOrigin = atof( pszParamVal );
-                        if (dfLatNatOrigin > 0.0) dfLatPole = 90.0;
-                        else dfLatPole = -90.0;
-                        // vszNCDFAtt.push_back( LAT_PROJ_ORIGIN );
-                        // vszGDALAtt.push_back( LAT_PROJ_ORIGIN );
-                        oNCDFAttList.AddString( LAT_PROJ_ORIGIN );
-                        oGDALAttList.AddString( LAT_PROJ_ORIGIN );
-                        oValList.push_back( dfLatPole ); 
-                    }
-
-                    break;
-                }
+                /* special case for PS grid */
+                if ( EQUAL( SRS_PP_LATITUDE_OF_ORIGIN, pszGDALAtt->c_str() ) &&
+                     EQUAL(pszProjection, SRS_PT_POLAR_STEREOGRAPHIC) ) {
+                    double dfLatPole = 0.0;
+                    if ( dfValue > 0.0) dfLatPole = 90.0;
+                    else dfLatPole = -90.0;
+                        oOutList.push_back( std::make_pair( LAT_PROJ_ORIGIN, 
+                                                            dfLatPole ) );
+                }              
             }
+            // else printf("NOT FOUND!!!\n");
         }
+    
     }
     else { /* generic mapping, loop over projected values */
-        //PDS: PREVIOUS DEFAULT BEHAVIOUR
-        for( int iChild = 0; iChild < poPROJCS->GetChildCount(); iChild++ )
-        {
-            const OGR_SRSNode *poNode;
-            int bFoundParam = FALSE;
-            poNode = poPROJCS->GetChild( iChild );
-            if( !EQUAL(poNode->GetValue(),"PARAMETER") 
-                || poNode->GetChildCount() != 2 )
-                continue;
 
-            pszParamStr = poNode->GetChild(0)->GetValue();
-            pszParamVal = poNode->GetChild(1)->GetValue();
-        
-            for( int iMap=0; poMap[iMap].GDAL_ATT != NULL; iMap++ ) {
-                if( EQUAL( poMap[iMap].GDAL_ATT, pszParamStr ) ) {
-                    // vszNCDFAtt.push_back( poMap[iMap].NCDF_ATT );
-                    // vszGDALAtt.push_back( poMap[iMap].GDAL_ATT );
-                    oNCDFAttList.AddString( poMap[iMap].NCDF_ATT );
-                    oGDALAttList.AddString( poMap[iMap].GDAL_ATT );
-                    oValList.push_back( atof(pszParamVal) );
-                    bFoundParam = TRUE;
-                    break;
-                }
+        for ( oValIter = oValMap.begin(); oValIter != oValMap.end(); oValIter++ ) {
+
+            pszGDALAtt = &(oValIter->first);
+            dfValue = oValIter->second;
+
+            oAttIter = oAttMap.find( *pszGDALAtt );
+
+            if ( oAttIter != oAttMap.end() ) {
+                oOutList.push_back( std::make_pair( oAttIter->second, dfValue ) );
             }
-            /* special case - if not found insert the GDAL name */
-            if  ( ! bFoundParam ) {
-                // vszNCDFAtt.push_back( pszParamStr );
-                // vszGDALAtt.push_back( pszParamStr );
-                oNCDFAttList.AddString( pszParamStr );
-                oGDALAttList.AddString( pszParamStr );
-                oValList.push_back( atof(pszParamVal) );
+            else { /* special case - if not found insert the GDAL name */
+                oOutList.push_back( std::make_pair( *pszGDALAtt, dfValue ) );
             }
         }
     }
 
 
     /* Write all the values that were found */
-    // for (size_t i=0; i<vszNCDFAtt.size(); i++ ) {
-    for (int i=0; i<oNCDFAttList.Count(); i++ ) {
+    // std::vector< std::pair<std::string,double> >::reverse_iterator it;
+    // for (it = oOutList.rbegin();  it != oOutList.rend(); it++ ) {
+    std::vector< std::pair<std::string,double> >::iterator it;
+    for (it = oOutList.begin();  it != oOutList.end(); it++ ) {
+        pszParamVal = (it->first).c_str();
+        dfValue = it->second;
         /* Handle the STD_PARALLEL attrib */
-        if( EQUAL(oNCDFAttList[i], STD_PARALLEL_1 ) ) {
+        if( EQUAL( pszParamVal, STD_PARALLEL_1 ) ) {
             bFoundStdP1 = TRUE;
-            dfStdP[0] = oValList[i];
+            dfStdP[0] = dfValue;
         }
-        else if( EQUAL(oNCDFAttList[i], STD_PARALLEL_2 ) ) {
+        else if( EQUAL( pszParamVal, STD_PARALLEL_2 ) ) {
             bFoundStdP2 = TRUE;
-            dfStdP[1] = oValList[i];
+            dfStdP[1] = dfValue;
         } 
         else {
             nc_put_att_double( fpImage, 
                                NCDFVarID, 
-                               oNCDFAttList[i],//vszNCDFAtt[i],
+                               pszParamVal,
                                NC_DOUBLE,
                                1,
-                               &oValList[i] );
+                               & dfValue );
         }
     }
     /* Now write the STD_PARALLEL attrib */
@@ -3963,31 +3979,6 @@ void NCDFWriteProjAttribs( const OGR_SRSNode *poPROJCS,
                                dfStdP );
         }
     }
-}
-
-// PDS
-/* Helper function to get the value of a parameter of a projection in
- * a GDAL OGR_SRSNode structure */
-const char* GetProjParamVal(const OGR_SRSNode *poPROJCS, 
-                            const char* findParamStr)
-{
-    const char *pszParamStr, *pszParamVal;
-
-    for( int iChild = 0; iChild < poPROJCS->GetChildCount(); iChild++ )
-    {
-        const OGR_SRSNode *poNode;
-        
-        poNode = poPROJCS->GetChild( iChild );
-        if( !EQUAL(poNode->GetValue(),"PARAMETER") 
-            || poNode->GetChildCount() != 2 )
-            continue;
-
-        pszParamStr = poNode->GetChild(0)->GetValue();
-        pszParamVal = poNode->GetChild(1)->GetValue();
-        if( EQUAL( pszParamStr, findParamStr ) ) 
-            return pszParamVal;
-    }
-    return "";    
 }
 
 /************************************************************************/

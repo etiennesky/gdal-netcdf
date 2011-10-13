@@ -531,7 +531,6 @@ static const oNetcdfSRS_PT poNetcdfSRS_PT[] = {
     {STEREO, SRS_PT_STEREOGRAPHIC, poStMappings },
     {"swiss_oblique_cylindrical", SRS_PT_SWISS_OBLIQUE_CYLINDRICAL, NULL },
     {TM, SRS_PT_TRANSVERSE_MERCATOR, poTMMappings },
-    /* {TM, SRS_PT_TRANSVERSE_MERCATOR, NULL }, //just a test */
     {"TM_south_oriented", SRS_PT_TRANSVERSE_MERCATOR_SOUTH_ORIENTED, NULL },
     {NULL, NULL, NULL },
 };
