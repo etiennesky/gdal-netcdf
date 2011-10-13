@@ -1686,15 +1686,20 @@ void netCDFDataset::SetProjection( int var )
         CPLFree( pdfYCoord );
     }
 
+    CPLDebug( "GDAL_netCDF", 
+              "bGotGeogCS=%d bGotCfSRS=%d bGotGeoTransform=%d\n\n",
+              bGotGeogCS, bGotCfSRS, bGotGeoTransform );
+
 /* -------------------------------------------------------------------- */
-/*     Set the WKT for this dataset if we got it from CF                */
+/*     Set Projection if we got a geotransform                          */
 /* -------------------------------------------------------------------- */
-    if ( bGotCfSRS ) {
+    if ( bGotGeoTransform ) {
         oSRS.exportToWkt( &(poDS->pszProjection) );
         // oSRS.exportToPrettyWkt( &(poDS->pszProjection) );
         CPLDebug( "GDAL_netCDF", "set WKT from CF [%s]\n", poDS->pszProjection );
-        if ( !bGotGeoTransform )  
-            CPLError(CE_Warning, 1,"WARNING: got SRS but not geotransform from CF!");
+    }
+    else if ( bGotGeogCS || bGotCfSRS ) {
+        CPLError(CE_Warning, 1,"WARNING: got SRS but not geotransform from CF!");
     }
 
 /* -------------------------------------------------------------------- */
@@ -1742,7 +1747,7 @@ void netCDFDataset::SetProjection( int var )
                 if ( oSRSGDAL.GetAttrNode( "DATUM" ) )
                     oSRSGDAL.GetAttrNode( "DATUM" )->GetChild(0)->SetValue( "unknown" );
                 if ( oSRS.IsSame(&oSRSGDAL) ) {
-                    printf("ARE SAME, using GDAL WKT\n");
+                    // printf("ARE SAME, using GDAL WKT\n");
                     bGotGdalSRS = TRUE;
                     poDS->pszProjection = CPLStrdup( pszWKT );
                 }
@@ -3811,6 +3816,9 @@ void NCDFWriteProjAttribs( const OGR_SRSNode *poPROJCS,
         if ( EQUAL( pszProjection, poNetcdfSRS_PT[iMap].GDAL_SRS ) ) {
             nMapIndex = iMap;
             poMap = poNetcdfSRS_PT[iMap].mappings;
+            CPLDebug( "GDAL_netCDF", 
+                      "Found mapping{poNetcdfSRS_PT[iMap].NCDF_SRS ,poNetcdfSRS_PT[iMap].GDAL_SRS ,}\n" );
+            break;
         }
     }
 
@@ -3819,11 +3827,15 @@ void NCDFWriteProjAttribs( const OGR_SRSNode *poPROJCS,
         printf("WARNING! projection name %s note found in the lookup tables!!!",pszProjection);
     }
     /* if no mapping was found or assigned, set the generic one */
-    if ( !poMap ) poMap = poGenericMappings;
+    if ( !poMap ) {
+        printf("WARNING! projection name %s in not part of the CF standard, will not be supported by CF!",pszProjection);
+        poMap = poGenericMappings;
+    }
 
-    // for (int i = 0; poMap[i].GDAL_ATT != NULL; i++ ) {
-    //     printf("attribute map: %s %s\n",poMap[i].NCDF_ATT,poMap[i].GDAL_ATT);
-    // }
+    for (int i = 0; poMap[i].GDAL_ATT != NULL; i++ ) {
+        CPLDebug( "GDAL_netCDF","attribute map: %s %s\n",
+                  poMap[i].NCDF_ATT,poMap[i].GDAL_ATT);
+    }
   
     /* Lookup mappings and fill vectors */
     /* The code is duplicated for lack of a generic algorithm */
@@ -4060,165 +4072,10 @@ void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist)
 }
 
 
-/* -------------------------------------------------------------------- */
-/*      Set Lambert Conformal Conic Projection                          */
-/* -------------------------------------------------------------------- */
-
-
     
-//Albers equal area
-//
-//grid_mapping_name = albers_conical_equal_area
-//
-//Map parameters:
-//
-//    * standard_parallel - There may be 1 or 2 values.
-//    * longitude_of_central_meridian
-//    * latitude_of_projection_origin
-//    * false_easting
-//    * false_northing
-//Azimuthal equidistant
-//
-//grid_mapping_name = azimuthal_equidistant
-//
-//Map parameters:
-//
-//    * longitude_of_projection_origin
-//    * latitude_of_projection_origin
-//    * false_easting
-//    * false_northing
-//Lambert azimuthal equal area
-//
-//grid_mapping_name = lambert_azimuthal_equal_area
-//
-//Map parameters:
-//
-//    * longitude_of_projection_origin
-//    * latitude_of_projection_origin
-//    * false_easting
-//    * false_northing
-//Lambert conformal
-//
-//grid_mapping_name = lambert_conformal_conic
-//
-//Map parameters:
-//
-//    * standard_parallel - There may be 1 or 2 values.
-//    * longitude_of_central_meridian
-//    * latitude_of_projection_origin
-//    * false_easting
-//    * false_northing
-//Lambert Cylindrical Equal Area
-//
-//grid_mapping_name = lambert_cylindrical_equal_area
-//
-//Map parameters:
-//
-//    * longitude_of_central_meridian
-//    * either standard_parallel or scale_factor_at_projection_origin
-//    * false_easting
-//    * false_northing
-//Latitude-Longitude
-//
-//grid_mapping_name = latitude_longitude
-//
-//Map parameters:
-//
-//    * None
-//Mercator
-//
-//grid_mapping_name = mercator
-//
-//Map parameters:
-//
-//    * longitude_of_projection_origin
-//    * either standard_parallel or scale_factor_at_projection_origin
-//    * false_easting
-//    * false_northing
-//Orthographic//
-//grid_mapping_name = orthographic
-//
-//Map parameters:
-//
-//    * longitude_of_projection_origin
-//    * latitude_of_projection_origin
-//    * false_easting
-//    * false_northing
-//Polar stereographic
-//
-//grid_mapping_name = polar_stereographic
-//
-//Map parameters:
-//
-//    * straight_vertical_longitude_from_pole
-//    * latitude_of_projection_origin - Either +90. or -90.
-//    * Either standard_parallel or scale_factor_at_projection_origin
-//    * false_easting
-//    * false_northing
-//Rotated pole
-//
-//grid_mapping_name = rotated_latitude_longitude
-//
-//Map parameters:
-//
-//    * grid_north_pole_latitude
-//    * grid_north_pole_longitude
-//    * north_pole_grid_longitude - This parameter is optional (default is 0.).
-//Stereographic
-//
-//grid_mapping_name = stereographic
-//
-//Map parameters:
-//
-//    * longitude_of_projection_origin
-//    * latitude_of_projection_origin
-//    * scale_factor_at_projection_origin
-//    * false_easting
-//    * false_northing
-//Transverse Mercator
-//
-//grid_mapping_name = transverse_mercator
-//
-//Map parameters:
-//
-//    * scale_factor_at_central_meridian
-//    * longitude_of_central_meridian
-//    * latitude_of_projection_origin
-//    * false_easting
-//    * false_northing
-//Vertical perspective
-//
-//grid_mapping_name = vertical_perspective
-//
-//Map parameters:
-//
-//    * latitude_of_projection_origin
-//    * longitude_of_projection_origin
-//    * perspective_point_height
-//    * false_easting
-//    * false_northing
-//
-//
-//Grid mapping attributes
-//
-//earth_radius
-//false_easting 	
-//false_northing 	
-//grid_mapping_name 	
-//grid_north_pole_latitude
-//grid_north_pole_longitude
-//inverse_flattening
-//latitude_of_projection_origin 
-//longitude_of_central_meridian 
-//longitude_of_prime_meridian
-//longitude_of_projection_origin
-//north_pole_grid_longitude 
-//perspective_point_height	
-//scale_factor_at_central_meridian 
-//scale_factor_at_projection_origin 
-//semi_major_axis
-//semi_minor_axis
-//standard_parallel 	
-//straight_vertical_longitude_from_pole 	
+
+
+
+
 
 
