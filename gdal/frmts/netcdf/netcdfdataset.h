@@ -521,8 +521,8 @@ static const oNetcdfSRS_PT poNetcdfSRS_PT[] = {
     {"mollweide", SRS_PT_MOLLWEIDE, NULL },
     {"new_zealand_map_grid", SRS_PT_NEW_ZEALAND_MAP_GRID, NULL },
     /* for now map to STEREO, see bug #4267 */
-    /* {"oblique_stereographic", SRS_PT_OBLIQUE_STEREOGRAPHIC, NULL },  */
-    {STEREO, SRS_PT_OBLIQUE_STEREOGRAPHIC, poStMappings }, 
+    {"oblique_stereographic", SRS_PT_OBLIQUE_STEREOGRAPHIC, NULL }, 
+    /* {STEREO, SRS_PT_OBLIQUE_STEREOGRAPHIC, poStMappings },  */
     {"orthographic", SRS_PT_ORTHOGRAPHIC, poOrthoMappings },
     {POLAR_STEREO, SRS_PT_POLAR_STEREOGRAPHIC, poPSmappings },
     {"polyconic", SRS_PT_POLYCONIC, NULL },

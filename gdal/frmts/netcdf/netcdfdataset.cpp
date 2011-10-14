@@ -59,6 +59,9 @@ void NCDFWriteProjAttribs(const OGR_SRSNode *poPROJCS,
 
 */
 
+/* TODO ET
+- add a check for gdal/netcdf version based on svn revision
+ */
 
 /* ==================================================================== */
 /*                         netCDFRasterBand                             */
