@@ -283,7 +283,8 @@ def netcdf_4():
     # We don't want to gum up the test stream output with the
     # 'Warning 1: No UNIDATA NC_GLOBAL:Conventions attribute' message.
     gdal.PushErrorHandler( 'CPLQuietErrorHandler' )
-    result = tst.testOpen()
+    #don't test for checksum (see bug #4284)
+    result = tst.testOpen(skip_checksum = True)
     gdal.PopErrorHandler()
 
     return result
@@ -304,7 +305,8 @@ def netcdf_5():
     # We don't want to gum up the test stream output with the
     # 'Warning 1: No UNIDATA NC_GLOBAL:Conventions attribute' message.
     gdal.PushErrorHandler( 'CPLQuietErrorHandler' )
-    result = tst.testOpen()
+    #don't test for checksum (see bug #4284)
+    result = tst.testOpen(skip_checksum = True)
     gdal.PopErrorHandler()
 
     return result
