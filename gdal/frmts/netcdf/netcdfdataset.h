@@ -117,6 +117,8 @@
 #define NCDF_CONVENTIONS_CF "CF-1.5"
 #define NCDF_GDAL GDALVersionInfo("--version")
 #define NCDF_SPATIAL_REF "spatial_ref"
+#define NCDF_ADD_OFFSET  "add_offset"
+#define NCDF_SCALE_FACTOR "scale_factor"
 
 #define NCDF_
 
