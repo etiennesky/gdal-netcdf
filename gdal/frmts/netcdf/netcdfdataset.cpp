@@ -53,6 +53,8 @@ void NCDFWriteProjAttribs(const OGR_SRSNode *poPROJCS,
   and create option WRITE_BOTTOMUP
 - fix projected export+import CF
 - added simple progress
+- metadata export fixes + add_offset/scale_factor (bug #4211)
+
 */
 
 /* Various bugs that need fixing:
@@ -398,9 +400,7 @@ CPLErr netCDFRasterBand::CreateBandMetadata( )
     	    break;
     	}
         if ( bValidMeta ) {
-            printf("got metadata, type=%d [%s]=[%s]\n",atttype,szMetaTemp, szTemp );
            SetMetadataItem( szMetaTemp, szTemp );
-
         }
     }
 
@@ -515,6 +515,7 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
 
     if( status == NC_NOERR ) {
         switch( atttype ) {
+            status = -1;
             case NC_CHAR:
                 char *fillc;
                 fillc = (char *) CPLCalloc( attlen+1, sizeof(char) );
@@ -548,10 +549,15 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
             default:
                 break;
         }
-        status = nc_get_att_double( poDS->cdfid, nZId, 
-                                    szNoValueName, &dfNoData );
-        
-    } else {
+        // status = nc_get_att_double( poDS->cdfid, nZId, 
+        //                             szNoValueName, &dfNoData );
+
+        if ( status == NC_NOERR )
+            bNoDataSet = TRUE;
+
+    } 
+    /* if not found NoData, set the default one */
+    if ( ! bNoDataSet ) { 
         switch( vartype ) {
             case NC_BYTE:
                 /* don't do default fill-values for bytes, too risky */
@@ -580,7 +586,9 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
         }
 	    bNoDataSet = TRUE;
     }
-    SetNoDataValue( dfNoData );
+
+    if ( bNoDataSet ) 
+        SetNoDataValue( dfNoData );
 
     /* -------------------------------------------------------------------- */
     /* Attempt to fetch the scale_factor and add_offset attributes for the  */
@@ -2779,7 +2787,7 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
                 /* for variables, don't copy varname */
                  if ( strncmp( szMetaName, "NETCDF_VARNAME", 14) == 0 ) 
                     bCopyItem = FALSE;
-                 /* Remove add_offset and scale_factor, but set them later in CreateCopy() */
+                 /* Remove add_offset and scale_factor, but set them later from band data */
                  else if ( strcmp( szMetaName, NCDF_ADD_OFFSET ) == 0 ) 
                     bCopyItem = FALSE;
                 else if ( strcmp( szMetaName, NCDF_SCALE_FACTOR ) == 0 ) 
@@ -2852,7 +2860,47 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
         CSLDestroy( papszFieldData );
     }
 
+    /* Add Conventions and GDAL info at the end */
+    if( CDFVarID == NC_GLOBAL ) {
+
+        nc_put_att_text( fpImage, 
+                         NC_GLOBAL, 
+                         "Conventions", 
+                         strlen(NCDF_CONVENTIONS_CF),
+                         NCDF_CONVENTIONS_CF ); 
+        
+        nc_put_att_text( fpImage, 
+                         NC_GLOBAL, 
+                         "GDAL", 
+                         strlen(NCDF_GDAL),
+                         NCDF_GDAL ); 
+
+    }
+
+    /* Set add_offset and scale_factor here if needed */
+    else {
+
+        int bGotAddOffset, bGotScale;
+        double dfAddOffset = GDALGetRasterOffset( (GDALRasterBandH) poDS, &bGotAddOffset );
+        double dfScale = GDALGetRasterScale( (GDALRasterBandH) poDS, &bGotScale );
+
+        if ( bGotAddOffset && dfAddOffset != 0.0 && bGotScale && dfScale != 1.0 ) {
+            nc_put_att_double( fpImage, CDFVarID, 
+                               NCDF_ADD_OFFSET,
+                               NC_DOUBLE,
+                               1,
+                               &dfAddOffset );
+            nc_put_att_double( fpImage, CDFVarID, 
+                               NCDF_SCALE_FACTOR,
+                               NC_DOUBLE,
+                               1,
+                               &dfScale );
+
+        }
+    }
+
 }
+
 
 /************************************************************************/
 /*                             CreateCopy()                             */
@@ -3122,18 +3170,6 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 /* -------------------------------------------------------------------- */
     CopyMetadata((void *) poSrcDS, fpImage, NC_GLOBAL );
 
-    nc_put_att_text( fpImage, 
-                     NC_GLOBAL, 
-                     "Conventions", 
-                     strlen(NCDF_CONVENTIONS_CF),
-                     NCDF_CONVENTIONS_CF ); 
-    
-    nc_put_att_text( fpImage, 
-                     NC_GLOBAL, 
-                     "GDAL", 
-                     strlen(NCDF_GDAL),
-                     NCDF_GDAL ); 
-    
     sprintf( szTemp, "GDAL NCDFCreateCopy( %s, ... )",pszFilename );
     NCDFAddHistory( fpImage, 
                     szTemp, 
@@ -3940,21 +3976,6 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 
         CopyMetadata( (void *) hBand, fpImage, NCDFVarID );
 
-        /* Set add_offset and scale_factor here if needed */
-        double dfAddOffset = poSrcBand->GetOffset();
-        double dfScale = poSrcBand->GetScale();
-        if ( dfAddOffset != 0.0 && dfScale != 1.0 ) {
-            nc_put_att_double( fpImage, NCDFVarID, 
-                               NCDF_ADD_OFFSET,
-                               NC_DOUBLE,
-                               1,
-                               &dfAddOffset );
-            nc_put_att_double( fpImage, NCDFVarID, 
-                               NCDF_SCALE_FACTOR,
-                               NC_DOUBLE,
-                               1,
-                               &dfScale );
-        }
 /* -------------------------------------------------------------------- */
 /*      Write Projection for band                                       */
 /* -------------------------------------------------------------------- */
