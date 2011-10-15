@@ -1804,7 +1804,6 @@ void netCDFDataset::SetProjection( int var )
     else if ( bGotGeogCS || bGotCfSRS ) {
         CPLError(CE_Warning, 1,"WARNING: got SRS but no geotransform from CF!");
     }
-
 /* -------------------------------------------------------------------- */
 /*      Process custom GDAL values (spatial_ref, GeoTransform)          */
 /* -------------------------------------------------------------------- */
@@ -2777,9 +2776,9 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
 /*
 Driver options:
 
-WRITE_LONLAT=YES/NO (default: YES for geographic, NO for projected)
+WRITE_LONLAT=YES/NO/IF_NEEDED (default: YES for geographic, IF_NEEDED for projected)
 TYPE_LONLAT=float/double (default: double for geographic, float for projected)
-WRITE_GDAL_TAGS=YES/NO (default: YES)
+WRITE_GDAL_TAGS=YES/NO/IF_NEEDED (default: YES)
 WRITE_BOTTOMUP=YES/NO (default: YES)
 
 Config Options:
@@ -2915,6 +2914,8 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
     bBottomUp = CSLTestBoolean( CPLGetConfigOption( "GDAL_NETCDF_BOTTOMUP", "YES" ) );
     bBottomUp = CSLFetchBoolean( papszOptions, "WRITE_BOTTOMUP", bBottomUp );       
 
+    /* TODO could add a config option GDAL_NETCDF_PREF=GDAL/CF ; also add a WRITE_GDAL_TAGS=IF_NEEDED */
+
     if( oSRS.IsProjected() ) 
     {
         int bIsCfProjection = NCDFIsCfProjection( oSRS.GetAttrValue( "PROJECTION" ) );
@@ -2925,8 +2926,7 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                 
         // bWriteLonLat = CSLFetchBoolean( papszOptions, "WRITE_LONLAT", FALSE );
         pszValue = CSLFetchNameValue(papszOptions,"WRITE_LONLAT");
-        if ( pszValue == NULL ) bWriteLonLat = FALSE;
-        else if ( EQUAL( pszValue, "IF_NEEDED" ) ) {
+        if ( pszValue == NULL || EQUAL( pszValue, "IF_NEEDED" ) ) {
             if  ( bIsCfProjection )
                 bWriteLonLat = FALSE;
             else 
@@ -2952,21 +2952,22 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 
         // bWriteLonLat = CSLFetchBoolean( papszOptions, "WRITE_LONLAT", TRUE );
         pszValue =  CSLFetchNameValue(papszOptions,"WRITE_LONLAT");
-        if ( pszValue == NULL ) bWriteLonLat = TRUE;
-        else if ( EQUAL( pszValue, "IF_NEEDED" ) )  bWriteLonLat = TRUE;
+        if ( pszValue == NULL || EQUAL( pszValue, "IF_NEEDED" ) )  
+            bWriteLonLat = TRUE;
         else bWriteLonLat = CSLTestBoolean( pszValue );
-        if ( ! bSourceHasGeoTransform ) //don't write lon/lat if no source geotransform
+        /*  Don't write lon/lat if no source geotransform */
+        if ( ! bSourceHasGeoTransform )
             bWriteLonLat = FALSE;
-        /* If we don't write lon/lat, set dimnames to X/Y */
+        /* If we don't write lon/lat, set dimnames to X/Y and write gdal tags*/
         if ( ! bWriteLonLat ) {
             CPLError( CE_Warning, CPLE_AppDefined, 
                       "WARNING - creating geographic file without lon/lat values!");
-            // bWriteGDALTags = TRUE; //this is not desirable if ! bSourceHasGeoTransform
+            if ( bSourceHasGeoTransform ) 
+                bWriteGdalTags = TRUE; //not desireable if no geotransform
             pszLonDimName = NCDF_DIMNAME_X;
             pszLatDimName = NCDF_DIMNAME_Y;
             // bBottomUp = FALSE; 
         }
-        if ( bWriteGdalTags ) bWriteGridMapping = TRUE;
  
         eLonLatType = NC_DOUBLE;
         pszValue =  CSLFetchNameValue(papszOptions,"TYPE_LONLAT");
@@ -2974,9 +2975,11 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
             eLonLatType = NC_FLOAT;
 
         nLonSize = nXSize;
-        nLatSize = nYSize;
-        
+        nLatSize = nYSize;     
     }
+    
+    /* make sure we write grid_mapping if we need to write GDAL tags */
+    if ( bWriteGdalTags ) bWriteGridMapping = TRUE;
 
     CPLDebug( "GDAL_netCDF", 
               "bWriteGridMapping=%d bWriteGdalTags=%d bWriteLonLat=%d bBottomUp=%d",
@@ -3062,8 +3065,6 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
         const char  *pszProjection;
         OGRSpatialReference *poLatLonCRS = NULL;
         OGRCoordinateTransformation *poTransform = NULL;
-        // const char *pszNetCDFSRS;
-        // double dfNN, dfSN=0.0, dfEE=0.0, dfWE=0.0;
 
         double *padYVal = NULL;
         double *padXVal = NULL;
@@ -3121,11 +3122,8 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 
 
         /* Various projection attributes */
-        //PDS: poNetcdfSRS, poPROJCS, pszProjection
-        //PDS: Write these out: separate function due to complexity, need to
-        // keep in synch with SetProjection function
+        // PDS: keep in synch with SetProjection function
         NCDFWriteProjAttribs(poPROJCS, pszProjection, fpImage, NCDFVarID);
-        /////////////////
 
         /*  Optional GDAL custom projection tags */
         if ( bWriteGdalTags ) {
@@ -3163,7 +3161,7 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                 poTransform = OGRCreateCoordinateTransformation( &oSRS, poLatLonCRS );
             if( poTransform != NULL )
             {
-                // printf("TMP ET got transform\n");
+                /* TODO: fix this to transform and write in blocks, to lower memory needed */
                 padLatVal = (double *) CPLMalloc( nLatSize * sizeof( double ) );
                 padLonVal = (double *) CPLMalloc( nLonSize * sizeof( double ) );
             }
@@ -3183,10 +3181,8 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
             /* The data point is centered inside the pixel */
             if ( ! bBottomUp )
                 padYVal[j] = dfY0 + (j+0.5)*dfDY ;
-                //padLatVal[k] = dfY0 + j*dfDY ;
             else /* invert latitude values */ 
                 padYVal[j] = dfY0 - (j+0.5)*dfDY ;
-                //padLatVal[k] = dfY0 - j*dfDY ;
             
              if ( bWriteLonLat == TRUE ) {
                  for( int i=0; i<nXSize; i++ ) {
@@ -3233,10 +3229,6 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 /* -------------------------------------------------------------------- */
 /*      Transform (X,Y) values to (lon,lat)                             */
 /* -------------------------------------------------------------------- */
-
-        // for( int i=0; i<nXSize*nYSize; i++ ) {
-        //     printf("%f ",padLonVal[i]);
-        // }
 
         pfnProgress( 0.10, NULL, pProgressData );
 
@@ -3923,20 +3915,20 @@ int NCDFIsCfProjection( const char* pszProjection )
     return FALSE;
 }
 
-/* PDS */
 /* Write any needed projection attributes *
  * poPROJCS: ptr to proj crd system
  * pszProjection: name of projection system in GDAL WKT
  * fpImage: open NetCDF file in writing mode
  * NCDFVarID: NetCDF Var Id of proj system we're writing in to
  *
- * Note: Default behaviour for each projection is just to choose the
- *  appropriate mappings, then call std function that knows how to
- *  write these.
- *
- * However, flexibility exists so that custom code can be written e.g.
- *  if any params need pre-processing in future to transform (i.e.
- *  the straight mappings approach is too simplistic).
+ * The function first looks for the oNetcdfSRS_PP mapping object
+ * that corresponds to the input projection name. If none is found
+ * the generic mapping is used.  In the case of specific mappings,
+ * the driver looks for each attribute listed in the mapping object
+ * and then looks up the value within the OGR_SRSNode. In the case
+ * of the generic mapping, the lookup is reversed (projection params, 
+ * then mapping).  For more generic code, GDAL->NETCDF 
+ * mappings and the associated value are saved in std::map objects.
  */
 
 /* NOTE modifications by ET to combine the specific and generic mappings */
@@ -3976,10 +3968,10 @@ void NCDFWriteProjAttribs( const OGR_SRSNode *poPROJCS,
         }
     }
 
-    //ET TODO if projection name is not found, should behave differently (needs testing)
+    //ET TODO if projection name is not found, should we do something special?
     if ( nMapIndex == -1 ) {
         CPLError( CE_Warning, CPLE_AppDefined, 
-                  "WARNING! projection name %s note found in the lookup tables!!!",
+                  "WARNING! projection name %s not found in the lookup tables!!!",
                   pszProjection);
     }
     /* if no mapping was found or assigned, set the generic one */
@@ -4013,15 +4005,12 @@ void NCDFWriteProjAttribs( const OGR_SRSNode *poPROJCS,
         pszParamStr = poNode->GetChild(0)->GetValue();
         pszParamVal = poNode->GetChild(1)->GetValue();
 
-        // printf("Inserting %s %f\n",pszParamStr,atof(pszParamVal));
         oValMap[pszParamStr] = atof(pszParamVal);
     }
     // for ( oValIter = oValMap.begin(); oValIter != oValMap.end(); oValIter++ )
     //     printf ("GDAL ATT=[%s] value=[%f]\n",(oValIter->first).c_str(),(oValIter->second));
 
-    /* Lookup mappings and fill vectors */
-    /* The code is duplicated for lack of a generic algorithm */
-    /* (must switch the order of the for statements). */
+    /* Lookup mappings and fill output vector */
     if ( poMap != poGenericMappings ) { /* specific mapping, loop over mapping values */
 
         for ( oAttIter = oAttMap.begin(); oAttIter != oAttMap.end(); oAttIter++ ) {
@@ -4066,7 +4055,6 @@ void NCDFWriteProjAttribs( const OGR_SRSNode *poPROJCS,
             }
         }
     }
-
 
     /* Write all the values that were found */
     // std::vector< std::pair<std::string,double> >::reverse_iterator it;
