@@ -363,7 +363,7 @@ def netcdf_7():
     
 ###############################################################################
 #check for cf convention read of albers equal area
-def netcdf_8def netcdf_8():
+def netcdf_8():
 
     if gdaltest.netcdf_drv is None:
         return 'skip'
