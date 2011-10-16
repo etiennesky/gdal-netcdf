@@ -301,14 +301,14 @@ CPLErr netCDFRasterBand::CreateBandMetadata( )
                     status =  nc_get_vara_float( poDS->cdfid, nVarID, 
                                                  start,
                                                  count, &fData );
-                    sprintf( szMetaTemp,"%f", fData );
+                    sprintf( szMetaTemp,"%.7g", fData );
                     break;
                 case NC_DOUBLE:
                     double dfData;
                     status =  nc_get_vara_double( poDS->cdfid, nVarID, 
                                                   start,
                                                   count, &dfData);
-                    sprintf( szMetaTemp,"%.16g", dfData );
+                    sprintf( szMetaTemp,"%.15g", dfData );
                     break;
                 default:
                     break;
@@ -386,13 +386,13 @@ CPLErr netCDFRasterBand::CreateBandMetadata( )
     	case NC_FLOAT:
     	    status = nc_get_att_float( poDS->cdfid, nZId,
     				       szTemp, &fval );
-    	    sprintf( szTemp,"%f",fval);
+    	    sprintf( szTemp,"%.7g",fval);
     	    // SetMetadataItem( szMetaTemp, szTemp );
     	    break;
     	case NC_DOUBLE:
     	    status = nc_get_att_double( poDS->cdfid, nZId,
     					szTemp, &dval );
-    	    sprintf( szTemp,"%.16g",dval);
+    	    sprintf( szTemp,"%.15g",dval);
             // SetMetadataItem( szMetaTemp, szTemp );
     	    break;
     	default:
@@ -599,12 +599,12 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
     double dfScale = 1.0; 
     if ( nc_inq_attid ( poDS->cdfid, nZId, NCDF_ADD_OFFSET, NULL) == NC_NOERR ) { 
         status = nc_get_att_double( poDS->cdfid, nZId, NCDF_ADD_OFFSET, &dfOff );
-        CPLDebug( "GDAL_netCDF", "got add_offset=%.16g, status=%d", dfOff,status );
+        CPLDebug( "GDAL_netCDF", "got add_offset=%.15g, status=%d", dfOff,status );
     }
     if ( nc_inq_attid ( poDS->cdfid, nZId, 
                         NCDF_SCALE_FACTOR, NULL) == NC_NOERR ) { 
          status = nc_get_att_double( poDS->cdfid, nZId, NCDF_SCALE_FACTOR, &dfScale ); 
-        CPLDebug( "GDAL_netCDF", "got scale_factor=%.16g, status=%d", dfScale,status );
+        CPLDebug( "GDAL_netCDF", "got scale_factor=%.15g, status=%d", dfScale,status );
     }
     SetOffset( dfOff ); 
     SetScale( dfScale ); 
@@ -2135,10 +2135,10 @@ CPLErr netCDFDataset::ReadAttributes( int cdfid, int var)
                 pfTemp = (float *) CPLCalloc( nAttrLen, sizeof( float ) );
                 nc_get_att_float( cdfid, var, szAttrName, pfTemp );
                 for(m=0; m < nAttrLen-1; m++) {
-                    sprintf( szTemp, "%f, ", pfTemp[m] );
+                    sprintf( szTemp, "%.7g, ", pfTemp[m] );
                     SafeStrcat(&pszMetaTemp, szTemp, &nMetaTempSize);
                 }
-        	    sprintf( szTemp, "%f", pfTemp[m] );
+        	    sprintf( szTemp, "%.7g", pfTemp[m] );
         	    SafeStrcat(&pszMetaTemp,szTemp, &nMetaTempSize);
                 CPLFree(pfTemp);
                 break;
@@ -2147,10 +2147,10 @@ CPLErr netCDFDataset::ReadAttributes( int cdfid, int var)
                 pdfTemp = (double *) CPLCalloc(nAttrLen, sizeof(double));
                 nc_get_att_double( cdfid, var, szAttrName, pdfTemp );
                 for(m=0; m < nAttrLen-1; m++) {
-                    sprintf( szTemp, "%.16g, ", pdfTemp[m] );
+                    sprintf( szTemp, "%.15g, ", pdfTemp[m] );
                     SafeStrcat(&pszMetaTemp, szTemp, &nMetaTempSize);
                 }
-        	    sprintf( szTemp, "%.16g", pdfTemp[m] );
+        	    sprintf( szTemp, "%.15g", pdfTemp[m] );
         	    SafeStrcat(&pszMetaTemp, szTemp, &nMetaTempSize);
                 CPLFree(pdfTemp);
                 break;
@@ -2797,29 +2797,32 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
             if ( bCopyItem ) {
 
                 /* By default write NC_CHAR, but detect for int/float/double */
-                /* http://stackoverflow.com/questions/78474/determine-if-a-string-is-an-integer-or-a-float-in-ansi-c */
                 nMetaType = NC_CHAR;
-
+                nMetaValue = fMetaValue = dfMetaValue = 0;
+                
                 errno = 0;
                 nMetaValue = strtol( szMetaValue, &pszTemp, 10 );
                 if ( (errno == 0) && (szMetaValue != pszTemp) && (*pszTemp == 0) ) {
                     nMetaType = NC_INT;
                 }
-
-                errno = 0;
-                fMetaValue = strtof( szMetaValue, &pszTemp );
-                if ( (errno == 0) && (szMetaValue != pszTemp) && (*pszTemp == 0) ) {
-                    if ( nMetaType != NC_INT ) nMetaType = NC_FLOAT;
+                else {
+                    errno = 0;
+                    dfMetaValue = strtod( szMetaValue, &pszTemp );
+                    if ( (errno == 0) && (szMetaValue != pszTemp) && (*pszTemp == 0) ) {
+                        /* test for float instead of double */
+                        /* strtof() is C89, which is not available in MSVC */
+                        /* see if we loose precision if we cast to float and write to char* */
+                        fMetaValue = (float)dfMetaValue; 
+                        sprintf( szTemp,"%.7g",fMetaValue); 
+                        printf("TMP ET szMetaName=%s szMetaValue=%s szTemp=%s fMetaValue=%f/%.7g dfMetaValue=%.16g\n",
+                              szMetaName,szMetaValue,szTemp,fMetaValue,fMetaValue,dfMetaValue);
+                        if ( EQUAL(szTemp, szMetaValue ) )
+                            nMetaType = NC_FLOAT;
+                        else
+                            nMetaType = NC_DOUBLE;                   
+                    }
                 }
-
-                errno = 0;
-                dfMetaValue = strtod( szMetaValue, &pszTemp );
-                if ( (errno == 0) && (szMetaValue != pszTemp) && (*pszTemp == 0) ) {
-                    if ( (nMetaType != NC_INT && nMetaType != NC_FLOAT) 
-                         || ! CPLIsEqual( fMetaValue, dfMetaValue ) )
-                        nMetaType = NC_DOUBLE;                   
-                }
-
+                
                 /* now write the data */
                 switch( nMetaType ) {
                     case  NC_INT:
@@ -3024,7 +3027,7 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
     eErr = poSrcDS->GetGeoTransform( adfGeoTransform );
     *szGeoTransform = '\0';
     for( int i=0; i<6; i++ ) {
-        sprintf( szTemp, "%.16g ",
+        sprintf( szTemp, "%.15g ",
                  adfGeoTransform[i] );
         strcat( szGeoTransform, szTemp );
     }
