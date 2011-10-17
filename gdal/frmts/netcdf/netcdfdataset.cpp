@@ -1275,9 +1275,22 @@ void netCDFDataset::SetProjection( int var )
 /* -------------------------------------------------------------------- */
 
             else if( EQUAL( pszValue, CEA ) || EQUAL( pszValue, LCEA ) ) {
-                dfStdP1 = 
-                    poDS->FetchCopyParm( szGridMappingValue, 
-                                         STD_PARALLEL_1, 0.0 );
+                char **papszStdParallels = NULL;
+
+                papszStdParallels = 
+                    FetchStandardParallels( szGridMappingValue );
+
+                if( papszStdParallels != NULL ) {
+                    dfStdP1 = CPLAtofM( papszStdParallels[0] );
+                }
+                else {
+                    //TODO: add support for 'scale_factor_at_projection_origin' variant to standard parallel
+                    //Probably then need to calc a std parallel equivalent
+                    CPLError( CE_Failure, CPLE_NotSupported, 
+                              "The NetCDF driver does not support import of CF-1 LCEA "
+                              "'scale_factor_at_projection_origin' variant yet.\n" );
+                }
+
                 dfCentralMeridian = 
                     poDS->FetchCopyParm( szGridMappingValue, 
                                          LONG_CENTRAL_MERIDIAN, 0.0 );
@@ -1470,7 +1483,6 @@ void netCDFDataset::SetProjection( int var )
 /*      Mercator                                                        */
 /* -------------------------------------------------------------------- */
 		  
-            // TODO: handle 1SP vs 2SP case 
             else if ( EQUAL ( pszValue, MERCATOR ) ) {
                 char **papszStdParallels = NULL;
 
