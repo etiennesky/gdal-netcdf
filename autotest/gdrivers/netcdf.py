@@ -50,6 +50,7 @@ def netcdf_setup():
     gdaltest.netcdf_drv_has_nc2 = False
     gdaltest.netcdf_drv_has_nc4 = False
     gdaltest.netcdf_drv = gdal.GetDriverByName( 'NETCDF' )
+    gdaltest.netcdf_drv_silent = False;
 
     if gdaltest.netcdf_drv is None:
         print('NOTICE: netcdf not supported, skipping checks')
@@ -114,10 +115,23 @@ def netcdf_setup():
 
 ###############################################################################
 #test integrity of file copy
+def netcdf_get_simple_wkt( src_ds ):
 
-def netcdf_test_file_copy( ifile, tmpfile, driver_name ):
+    src_wkt = src_ds.GetProjection()
+    srs = osr.SpatialReference()
+    srs.ImportFromWkt(src_wkt)
+    #srs.GetRoot().StripNodes( "AXIS" );
+    #srs.GetRoot().StripNodes( "AUTHORITY" );
+    #srs.GetRoot().StripNodes( "EXTENSION" );
+    srs.StripCTParms()
 
-    #print 'netcdf_test_file_copy( '+ifile+', '+tmpfile+', '+driver_name+' )'
+    return (srs.ExportToWkt(), srs.ExportToProj4())
+
+def netcdf_test_file_copy( src_file, dst_file, driver_name, create_opts=None ):
+
+#    print( 'netcdf_test_file_copy( '+src_file+', '+dst_file+', '+driver_name+' )')
+#    if create_opts is not None:
+#        print( create_opts )
 
     #load driver(s)
     if gdaltest.netcdf_drv is None:
@@ -126,55 +140,65 @@ def netcdf_test_file_copy( ifile, tmpfile, driver_name ):
     if driver is None:
         return 'skip'
 
+    result = 'success'
+
     #create copy
-    src_ds = gdal.Open( ifile )
+    src_ds = gdal.Open( src_file )
     if src_ds is None:
-        gdaltest.post_reason( 'Failed to open file '+ifile )
+        gdaltest.post_reason( 'Failed to open src file '+src_file )
         return 'fail'
-    dst_ds = driver.CreateCopy( tmpfile, src_ds )
+    if create_opts is None:
+        dst_ds = driver.CreateCopy( dst_file, src_ds )
+    else:
+        dst_ds = driver.CreateCopy( dst_file, src_ds, 0, create_opts )
     if dst_ds is None:
-        gdaltest.post_reason( 'Failed to create file '+tmpfile )
+        gdaltest.post_reason( 'Failed to create dst file '+dst_file )
         return 'fail'
     dst_ds = None
-    dst_ds = gdal.Open( tmpfile )
+    dst_ds = gdal.Open( dst_file )
 
     #do some tests
     #print str(src_ds.GetGeoTransform())+'-'+str(dst_ds.GetGeoTransform())
     if src_ds.GetGeoTransform() != dst_ds.GetGeoTransform():
-        gdaltest.post_reason( 'Incorrect geotransform, got '+str(dst_ds.GetGeoTransform())+' for '+tmpfile )
-        return 'fail'
+        print( 'Incorrect geotransform for '+dst_file )
+        if not gdaltest.netcdf_drv_silent :
+            print( 'src:'+str(src_ds.GetGeoTransform())+ \
+                       "\ndst:"+str(dst_ds.GetGeoTransform()) )
+        result = 'fail'
     
     #get projection in PROJ.4 and WKT format
-    srs = osr.SpatialReference()
-    src_wkt = src_ds.GetProjection()
-    srs.ImportFromWkt(src_wkt)
-    src_proj4 = srs.ExportToProj4()
-    dst_wkt = dst_ds.GetProjection()
-    srs.ImportFromWkt(src_wkt)
-    dst_proj4 = srs.ExportToProj4()
+    (src_wkt, src_proj4) = netcdf_get_simple_wkt(src_ds)
+    (dst_wkt, dst_proj4) = netcdf_get_simple_wkt(dst_ds)
 
     #check projection in WKT format - don't cause test to fail, as it can be too stringent
+    #TODO ET - could use IsSameGeogCS() to compare instead, just like in netcdfdataset.cpp
     #print src_wkt+'-'+dst_wkt
     if src_wkt != dst_wkt:
-        print('WARNING: Possibly incorrect projection in file '+tmpfile+', got '+dst_wkt+' - will also check PROJ.4 string')
+        print('WARNING: Possibly incorrect projection in file '+dst_file)
+        if not gdaltest.netcdf_drv_silent :
+            print('src='+src_wkt+'\ndst='+dst_wkt)
+            #print('\ntesting PROJ.4 string:\n'+ \
+            #          ' src='+src_proj4+'\n dst='+dst_proj4 )
         #return 'fail'
 
     #check projection in PROJ.4 format - allow this test to fail
     #print src_proj4+'-'+dst_proj4
     if src_proj4 != dst_proj4:
-        gdaltest.post_reason( 'Incorrect projection, got '+dst_proj4+' for '+tmpfile )
-        return 'fail'
+        print( 'Incorrect projection for '+dst_file+'\nsrc=['+src_proj4+']\ndst=['+dst_proj4+']' )
+        result = 'fail'
 
     if src_ds.GetRasterBand(1).Checksum() != dst_ds.GetRasterBand(1).Checksum():
-        gdaltest.post_reason( 'Incorrect checksum, got'+dst_ds.GetRasterBand(1).Checksum()+' for '+tmpfile )
-        return 'fail'
+        print( 'Incorrect checksum for '+dst_file+ \
+                   'src='+src_ds.GetRasterBand(1).Checksum()+ \
+                   'dst='+dst_ds.GetRasterBand(1).Checksum())
+        result = 'fail'
 
     src_ds = None
     dst_ds = None
     #don't cleanup as we could use the tmpfile later, cleanup after all tests finished
     #gdaltest.clean_tmp()
 
-    return 'success'
+    return result
 
 ###############################################################################
 # Netcdf Tests

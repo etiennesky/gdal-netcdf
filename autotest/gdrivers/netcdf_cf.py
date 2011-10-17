@@ -205,6 +205,16 @@ def netcdf_cf_check_file(ifile,version='auto', silent=True):
 ###############################################################################
 # Definitions to test projections that are supported by CF
 
+netcdf_cfproj_tuples1 = [
+    ("M-1SP", "Mercator",
+        "+proj=merc +lon_0=145 +k_0=1 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs",
+        "mercator",
+        ['longitude_of_projection_origin',
+         'scale_factor_at_projection_origin',
+         'false_easting', 'false_northing'],
+         ['projection_x_coordinate','projection_y_coordinate'])
+]
+
 netcdf_cfproj_tuples = [
     ("AEA", "Albers Equal Area", "EPSG:3577", "albers_conical_equal_area",
         ['standard_parallel', 'longitude_of_central_meridian',
@@ -241,7 +251,6 @@ netcdf_cfproj_tuples = [
     # 2 entries for Mercator, since attribs different for 1SP or 2SP
     ("M-1SP", "Mercator",
         "+proj=merc +lon_0=145 +k_0=1 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs",
-        
         "mercator",
         ['longitude_of_projection_origin',
          'scale_factor_at_projection_origin',
@@ -302,7 +311,7 @@ netcdf_cfproj_tuples = [
 # For each projection, warp the original file and then create a netcdf
 
 def netcdf_cfproj_testcopy(projTuples, origTiff, inPath, outPath, resFilename):
-    silent = True
+ 
     """Test a Geotiff file can be converted to NetCDF, and projection in 
     CF-1 conventions can be successfully maintained. Save results to file.
     
@@ -311,6 +320,14 @@ def netcdf_cfproj_testcopy(projTuples, origTiff, inPath, outPath, resFilename):
     :arg: resFilename - results filename to write to.
 
     """
+
+    silent = True
+#    gdaltest.netcdf_drv_silent = True
+#    bWriteGdalTags="YES"
+    gdaltest.netcdf_drv_silent = False
+    bWriteGdalTags="YES"
+
+    result = 'success'
 
     # Test if ncdump is available
     try:
@@ -363,23 +380,23 @@ def netcdf_cfproj_testcopy(projTuples, origTiff, inPath, outPath, resFilename):
         srs.SetFromUserInput(proj[2])
         t_srs_wkt = srs.ExportToWkt()
         if not silent:
-            print("going to warp" + s_srs_wkt + "-" + t_srs_wkt)
+            print("going to warp file "+origTiff+"\n" + s_srs_wkt + "\ninto file "+projTiff + "\n" + t_srs_wkt)
         dswarp = gdal.AutoCreateWarpedVRT( dsTiff, s_srs_wkt, t_srs_wkt, GRA_NearestNeighbour, 0 );
         drv_gtiff = gdal.GetDriverByName("GTiff");
         drv_netcdf = gdal.GetDriverByName("netcdf");
-        dsw = drv_gtiff.CreateCopy(projTiff, dswarp, 0) #[ 'WRITEGDALTAGS=YES' ])
+        dsw = drv_gtiff.CreateCopy(projTiff, dswarp, 0)
         if not silent:
             print("Warped %s to %s" % (proj[0], projTiff))
 
         projNc = os.path.join(outPath, "%s_%s.nc" % \
             (origTiff.rstrip('.tif'), proj[0] ))
         #Force GDAL tags to be written to make testing easier, with preserved datum etc
-        ncCoOpts = "-co WRITEGDALTAGS=yes"
+        ncCoOpts = "-co WRITE_GDAL_TAGS=yes"
 #        cmd = " ".join(['gdal_translate', "-of netCDF", ncCoOpts, projTiff,
 #            projNc])
         if not silent:
             print("About to translate to NetCDF")
-        dst = drv_netcdf.CreateCopy(projNc, dsw, 0, [ 'WRITEGDALTAGS=YES' ])
+        dst = drv_netcdf.CreateCopy(projNc, dsw, 0, [ 'WRITE_GDAL_TAGS='+bWriteGdalTags ])
         if not silent:
             print("Translated to %s" % (projNc))
         
@@ -403,13 +420,22 @@ def netcdf_cfproj_testcopy(projTuples, origTiff, inPath, outPath, resFilename):
                 resFile.write("\tFailed cf check: %s\n" % \
                     (resPerProj[proj[0]]['cfcheck_error']))
 
+        # test file copy
+        projTiff2 = os.path.join(outPath, "%s_%s2.tif" % \
+            (origTiff.rstrip('.tif'), proj[0] ))
+        result1 = netcdf_test_file_copy( projTiff, projNc, 'NETCDF', [ 'WRITE_GDAL_TAGS='+bWriteGdalTags ] )
+        #result1 = 'success'
+        result2 = netcdf_test_file_copy( projNc, projTiff2, 'GTIFF' )
+        if result1 == 'fail' or result2 == 'fail':
+            result = 'fail'
+
     resFile.close()
 
     if not silent:
         print("\n" + "*" * 80)
         print("Saved results to file %s" % (os.path.join(outPath, resFilename)))
 
-    result = 'success'
+    #result = 'success'
     resFile = open(os.path.join(outPath, resFilename), "r")
     resStr = resFile.read()
     if resStr.find('BAD') != -1:
@@ -544,6 +570,8 @@ def netcdf_cf_4():
 
     result = netcdf_cfproj_testcopy(netcdf_cfproj_tuples, 'melb-small.tif', \
                                     'data', 'tmp', 'translate_results.txt')
+#    result = netcdf_cfproj_testcopy(netcdf_cfproj_tuples1, 'melb-small.tif', \
+#                                    'data', 'tmp', 'translate_results.txt')
 
     return result
      

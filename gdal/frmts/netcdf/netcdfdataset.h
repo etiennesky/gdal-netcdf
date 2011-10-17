@@ -110,15 +110,17 @@
 #define NCDF_FILETYPE_UNKNOWN         10  /* Filetype not determined (yet) */
 
 /* new defs */
-#define NCDF_DIMNAME_X "x"
-#define NCDF_DIMNAME_Y "y"
-#define NCDF_DIMNAME_LON "lon"
-#define NCDF_DIMNAME_LAT "lat"
-#define NCDF_CONVENTIONS_CF "CF-1.5"
-#define NCDF_GDAL GDALVersionInfo("--version")
-#define NCDF_SPATIAL_REF "spatial_ref"
-#define NCDF_ADD_OFFSET  "add_offset"
-#define NCDF_SCALE_FACTOR "scale_factor"
+#define NCDF_DIMNAME_X                "x"
+#define NCDF_DIMNAME_Y                "y"
+#define NCDF_DIMNAME_LON              "lon"
+#define NCDF_DIMNAME_LAT              "lat"
+#define NCDF_CONVENTIONS_CF           "CF-1.5"
+#define NCDF_GDAL                     GDALVersionInfo("--version")
+#define NCDF_SPATIAL_REF              "spatial_ref"
+#define NCDF_ADD_OFFSET               "add_offset"
+#define NCDF_SCALE_FACTOR             "scale_factor"
+#define NCDF_UNITS_M                  "metre"// should be SRS_UL_METER but use meter now for compat with gtiff files
+#define NCDF_UNITS_D                  SRS_UA_DEGREE
 
 #define NCDF_
 

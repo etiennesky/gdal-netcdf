@@ -918,6 +918,8 @@ void netCDFDataset::SetProjection( int var )
     int          nSpacingBegin;
     int          nSpacingMiddle;
     int          nSpacingLast;
+    int          bLookForWellKnownGCS = FALSE;  //this could be a Config Option
+    char         *pszUnits = NULL;
 
     /* These values from GDAL metadata */
     const char *pszWKT = NULL;
@@ -1797,6 +1799,7 @@ void netCDFDataset::SetProjection( int var )
                     pszValue = CSLFetchNameValue( poDS->papszMetadata, 
                                                   szTemp );
                     if( pszValue != NULL ) {
+                        pszUnits = CPLStrdup( pszValue );
                         if( EQUAL( pszValue, "km" ) ) {
                             xMinMax[0] = xMinMax[0] * 1000;
                             xMinMax[1] = xMinMax[1] * 1000;
@@ -1807,6 +1810,9 @@ void netCDFDataset::SetProjection( int var )
                     pszValue = CSLFetchNameValue( poDS->papszMetadata, 
                                                   szTemp );
                     if( pszValue != NULL ) {
+                        /* TODO: see how to deal with diff. values */
+                        // if ( ! EQUAL( pszValue, szUnits ) )
+                        //     strcpy( szUnits, "\0" );
                         if( EQUAL( pszValue, "km" ) ) {
                             yMinMax[0] = yMinMax[0] * 1000;
                             yMinMax[1] = yMinMax[1] * 1000;
@@ -1854,6 +1860,24 @@ void netCDFDataset::SetProjection( int var )
 /*     Set Projection if we got a geotransform                          */
 /* -------------------------------------------------------------------- */
     if ( bGotGeoTransform ) {
+        /* Set SRS Units */
+        /* TODO: check for other units */
+        if ( pszUnits != NULL && ! EQUAL(pszUnits,"") ) {
+            if ( EQUAL(pszUnits,"m") ) {
+                oSRS.SetLinearUnits( NCDF_UNITS_M, 1.0 );
+                oSRS.SetAuthority( "PROJCS|UNIT", "EPSG", 9001 );
+            }
+            else if ( EQUAL(pszUnits,"km") ) {
+                oSRS.SetLinearUnits( NCDF_UNITS_M, 1000.0 );
+                oSRS.SetAuthority( "PROJCS|UNIT", "EPSG", 9001 );
+            }
+            else if ( EQUALN(pszUnits,"degrees",7) ) {
+                oSRS.SetAngularUnits( NCDF_UNITS_D, CPLAtof(SRS_UA_DEGREE_CONV) );
+                oSRS.SetAuthority( "GEOGCS|UNIT", "EPSG", 9108 );
+            }
+            // else 
+            //     oSRS.SetLinearUnits(pszUnits, 1.0);
+        }
         oSRS.exportToWkt( &(poDS->pszProjection) );
         // oSRS.exportToPrettyWkt( &(poDS->pszProjection) );
         CPLDebug( "GDAL_netCDF", "set WKT from CF [%s]\n", poDS->pszProjection );
@@ -2002,8 +2026,8 @@ void netCDFDataset::SetProjection( int var )
 
     if ( bGotGeoTransform ) {
         CPLDebug( "GDAL_netCDF", "Got GeoTransform:" 
-                  "  %.16g, %.16g, %.16g"
-                  "  %.16g, %.16g, %.16g", 
+                  "  %.15g, %.15g, %.15g"
+                  "  %.15g, %.15g, %.15g", 
                   adfGeoTransform[0], adfGeoTransform[1],
                   adfGeoTransform[2], adfGeoTransform[3],
                   adfGeoTransform[4], adfGeoTransform[5] );
@@ -2013,35 +2037,37 @@ void netCDFDataset::SetProjection( int var )
 /*     Search for Well-known GeogCS if only got CF WKT                  */
 /*     Disabled for now, as a named datum also include control points   */
 /*     (see mailing list and bug#4281                                   */
+/*     For example, WGS84 vs. GDA94 (EPSG:3577) - AEA in netcdf_cf.py   */
 /* -------------------------------------------------------------------- */
-    // if ( bGotCfSRS && ! bGotGdalSRS ) {
-    //     /* ET - could use a more exhaustive method by scanning all EPSG codes in data/gcs.csv */
-    //     /* as proposed by Even in the gdal-dev mailing list "help for comparing two WKT" */
-    //     /* this code could be contributed to a new function */
-    //     /* OGRSpatialReference * OGRSpatialReference::FindMatchingGeogCS( const OGRSpatialReference *poOther ) */ 
-    //     printf("TMP ET - Search for Well-known GeogCS\n");
-    //     const char *pszWKGCSList[] = { "WGS84", "WGS72", "NAD27", "NAD83" };
-    //     char *pszWKGCS = NULL;
-    //     oSRS.exportToPrettyWkt( &pszWKGCS );
-    //     for( size_t i=0; i<sizeof(pszWKGCSList)/8; i++ ) {
-    //         pszWKGCS = CPLStrdup( pszWKGCSList[i] );
-    //         OGRSpatialReference oSRSTmp;
-    //         oSRSTmp.SetWellKnownGeogCS( pszWKGCSList[i] );
-    //         /* set datum to unknown, bug #4281 */
-    //         if ( oSRSTmp.GetAttrNode( "DATUM" ) )
-    //             oSRSTmp.GetAttrNode( "DATUM" )->GetChild(0)->SetValue( "unknown" );
-    //         oSRSTmp.GetRoot()->StripNodes( "AXIS" );
-    //         oSRSTmp.GetRoot()->StripNodes( "AUTHORITY" );
-    //         oSRSTmp.GetRoot()->StripNodes( "EXTENSION" );
-    //         oSRSTmp.exportToPrettyWkt( &pszWKGCS );
-    //         if ( oSRS.IsSameGeogCS(&oSRSTmp) ) {
-    //             oSRS.SetWellKnownGeogCS( pszWKGCSList[i] );
-    //             oSRS.exportToWkt( &(poDS->pszProjection) );
-    //             // oSRS.exportToPrettyWkt( &pszWKGCS );
-    //             // printf("TMP ET set WKT to\n[%s]\n",pszWKGCS);
-    //         }
-    //     }
-    // }
+    if ( bLookForWellKnownGCS && bGotCfSRS && ! bGotGdalSRS ) {
+        /* ET - could use a more exhaustive method by scanning all EPSG codes in data/gcs.csv */
+        /* as proposed by Even in the gdal-dev mailing list "help for comparing two WKT" */
+        /* this code could be contributed to a new function */
+        /* OGRSpatialReference * OGRSpatialReference::FindMatchingGeogCS( const OGRSpatialReference *poOther ) */ 
+        CPLDebug( "GDAL_netCDF", "Searching for Well-known GeogCS" );
+        const char *pszWKGCSList[] = { "WGS84", "WGS72", "NAD27", "NAD83" };
+        char *pszWKGCS = NULL;
+        oSRS.exportToPrettyWkt( &pszWKGCS );
+        for( size_t i=0; i<sizeof(pszWKGCSList)/8; i++ ) {
+            pszWKGCS = CPLStrdup( pszWKGCSList[i] );
+            OGRSpatialReference oSRSTmp;
+            oSRSTmp.SetWellKnownGeogCS( pszWKGCSList[i] );
+            /* set datum to unknown, bug #4281 */
+            if ( oSRSTmp.GetAttrNode( "DATUM" ) )
+                oSRSTmp.GetAttrNode( "DATUM" )->GetChild(0)->SetValue( "unknown" );
+            /* could use  OGRSpatialReference::StripCTParms() but let's keep TOWGS84 */
+            oSRSTmp.GetRoot()->StripNodes( "AXIS" );
+            oSRSTmp.GetRoot()->StripNodes( "AUTHORITY" );
+            oSRSTmp.GetRoot()->StripNodes( "EXTENSION" );
+            oSRSTmp.exportToPrettyWkt( &pszWKGCS );
+            if ( oSRS.IsSameGeogCS(&oSRSTmp) ) {
+                oSRS.SetWellKnownGeogCS( pszWKGCSList[i] );
+                oSRS.exportToWkt( &(poDS->pszProjection) );
+                // oSRS.exportToPrettyWkt( &pszWKGCS );
+                // printf("TMP ET set WKT to\n[%s]\n",pszWKGCS);
+            }
+        }
+    }
 
 }
 /************************************************************************/
