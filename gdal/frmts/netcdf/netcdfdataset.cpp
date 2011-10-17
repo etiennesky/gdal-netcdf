@@ -1470,31 +1470,60 @@ void netCDFDataset::SetProjection( int var )
 		  
             // TODO: handle 1SP vs 2SP case 
             else if ( EQUAL ( pszValue, MERCATOR ) ) {
-                dfCenterLon = 
-                    poDS->FetchCopyParm( szGridMappingValue, 
-                                         LON_PROJ_ORIGIN, 0.0 );
-	      
-                dfCenterLat = 
-                    poDS->FetchCopyParm( szGridMappingValue, 
-                                         LAT_PROJ_ORIGIN, 0.0 );
+                char **papszStdParallels = NULL;
 
-                dfScale = 
-                    poDS->FetchCopyParm( szGridMappingValue, 
-                                         SCALE_FACTOR_ORIGIN,
-                                         1.0 );
+                /* If there is a standard_parallel, know it is Mercator 2SP */
+                papszStdParallels = 
+                    FetchStandardParallels( szGridMappingValue );
+                
+                if (NULL != papszStdParallels) {
+                    /* CF-1 Mercator 2SP always has lat centered at equator */
+                    dfStdP1 = CPLAtofM( papszStdParallels[0] );
 
-                dfFalseEasting = 
-                    poDS->FetchCopyParm( szGridMappingValue, 
-                                         FALSE_EASTING, 0.0 );
+                    dfCenterLat = 0.0;
 
-                dfFalseNorthing = 
-                    poDS->FetchCopyParm( szGridMappingValue, 
-                                         FALSE_NORTHING, 0.0 );
+                    dfCenterLon = 
+                        poDS->FetchCopyParm( szGridMappingValue, 
+                                             LON_PROJ_ORIGIN, 0.0 );
+              
+                    dfFalseEasting = 
+                        poDS->FetchCopyParm( szGridMappingValue, 
+                                             FALSE_EASTING, 0.0 );
+
+                    dfFalseNorthing = 
+                        poDS->FetchCopyParm( szGridMappingValue, 
+                                             FALSE_NORTHING, 0.0 );
+
+                    oSRS.SetMercator2SP( dfStdP1, dfCenterLat, dfCenterLon, 
+                                      dfFalseEasting, dfFalseNorthing );
+                }
+                else {
+                    dfCenterLon = 
+                        poDS->FetchCopyParm( szGridMappingValue, 
+                                             LON_PROJ_ORIGIN, 0.0 );
+              
+                    dfCenterLat = 
+                        poDS->FetchCopyParm( szGridMappingValue, 
+                                             LAT_PROJ_ORIGIN, 0.0 );
+
+                    dfScale = 
+                        poDS->FetchCopyParm( szGridMappingValue, 
+                                             SCALE_FACTOR_ORIGIN,
+                                             1.0 );
+
+                    dfFalseEasting = 
+                        poDS->FetchCopyParm( szGridMappingValue, 
+                                             FALSE_EASTING, 0.0 );
+
+                    dfFalseNorthing = 
+                        poDS->FetchCopyParm( szGridMappingValue, 
+                                             FALSE_NORTHING, 0.0 );
+
+                    oSRS.SetMercator( dfCenterLat, dfCenterLon, dfScale, 
+                                      dfFalseEasting, dfFalseNorthing );
+                }                      
 
                 bGotCfSRS = TRUE;
-
-                oSRS.SetMercator( dfCenterLat, dfCenterLon, dfScale, 
-                                  dfFalseEasting, dfFalseNorthing );
 
                 if( !bGotGeogCS )
                     oSRS.SetWellKnownGeogCS( "WGS84" );
