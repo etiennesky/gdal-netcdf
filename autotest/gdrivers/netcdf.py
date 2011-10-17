@@ -173,10 +173,10 @@ def netcdf_test_file_copy( src_file, dst_file, driver_name, create_opts=None ):
     #check projection in WKT format - don't cause test to fail, as it can be too stringent
     #TODO ET - could use IsSameGeogCS() to compare instead, just like in netcdfdataset.cpp
     #print src_wkt+'-'+dst_wkt
-    if src_wkt != dst_wkt:
-        print('WARNING: Possibly incorrect projection in file '+dst_file)
-        if not gdaltest.netcdf_drv_silent :
-            print('src='+src_wkt+'\ndst='+dst_wkt)
+    #if src_wkt != dst_wkt:
+        #print('WARNING: Possibly incorrect projection in file '+dst_file)
+        #if not gdaltest.netcdf_drv_silent :
+        #    print('src='+src_wkt+'\ndst='+dst_wkt)
             #print('\ntesting PROJ.4 string:\n'+ \
             #          ' src='+src_proj4+'\n dst='+dst_proj4 )
         #return 'fail'
@@ -185,6 +185,8 @@ def netcdf_test_file_copy( src_file, dst_file, driver_name, create_opts=None ):
     #print src_proj4+'-'+dst_proj4
     if src_proj4 != dst_proj4:
         print( 'Incorrect projection for '+dst_file+'\nsrc=['+src_proj4+']\ndst=['+dst_proj4+']' )
+        print('src wkt='+src_wkt+'\ndst wkt='+dst_wkt)
+
         result = 'fail'
 
     if src_ds.GetRasterBand(1).Checksum() != dst_ds.GetRasterBand(1).Checksum():

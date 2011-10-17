@@ -364,6 +364,7 @@ def netcdf_cfproj_testcopy(projTuples, origTiff, inPath, outPath, resFilename):
     s_srs_wkt = dsTiff.GetProjection()
 
     for proj in projTuples:
+        print("")
         # Our little results data structures
         if not silent:
             print("Testing %s (%s) translation:" % (proj[0], proj[1]))
