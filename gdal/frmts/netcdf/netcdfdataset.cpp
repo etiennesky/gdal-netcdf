@@ -1578,19 +1578,34 @@ void netCDFDataset::SetProjection( int var )
 /* -------------------------------------------------------------------- */
 		  
             else if ( EQUAL ( pszValue, POLAR_STEREO ) ) {
+                /* Note: reversing our current mapping on export, from
+                   'latitude_of_origin' in OGC WKT to 'standard_parallel' in CF-1 */
+                char **papszStdParallels = NULL;
 
-                dfCenterLon = 
-                    poDS->FetchCopyParm( szGridMappingValue, 
-                                         LON_PROJ_ORIGIN, 0.0 );
-
-                dfCenterLat = 
-                    poDS->FetchCopyParm( szGridMappingValue, 
-                                         LAT_PROJ_ORIGIN, 0.0 );
-		
+                papszStdParallels = 
+                    FetchStandardParallels( szGridMappingValue );
+                
+                if (NULL != papszStdParallels) {
+                    dfCenterLat = CPLAtofM( papszStdParallels[0] );
+                }
+                else {
+                    //TODO: not totally sure how to handle if CF-1 doesn't include a std_parallel:
+                    // at the moment we're assuming this matches up with
+                    // latitude of natural origin
+                    // (http://www.remotesensing.org/geotiff/proj_list/polar_stereographic.html)
+                    // and don't have an alternative calculation based on scale factor
+                    CPLError( CE_Failure, CPLE_NotSupported, 
+                              "The NetCDF driver does not yet to support import of CF-1 Polar stereographic "
+                              "without a std_parallel attribute.\n" );
+                }
                 dfScale = 
                     poDS->FetchCopyParm( szGridMappingValue, 
                                          SCALE_FACTOR_ORIGIN, 
                                          1.0 );
+
+                dfCenterLon = 
+                    poDS->FetchCopyParm( szGridMappingValue, 
+                                         VERT_LONG_FROM_POLE, 0.0 );
 
                 dfFalseEasting = 
                     poDS->FetchCopyParm( szGridMappingValue, 

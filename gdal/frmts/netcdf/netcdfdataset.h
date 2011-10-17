@@ -390,18 +390,18 @@ static const oNetcdfSRS_PP poOrthoMappings[] = {
 //    * false_easting
 //    * false_northing
 
-/* TODO: CF-1 says 'standard_parallel' may replace scale factor
-   TODO: In CF-1, LAT_PROJ_ORIGIN is either +90 or -90. Not sure
-   how this maps to OGC stuff?
-   eg do we have to check LAT_PROJ_ORIGIN is +90 or -90?
-   Or in this case, is "std_parallel" in CF-1 really the same as
-   LAT_OF_ORIGIN in WKT, and we fill in LAT_OF_ORIGIN with +90 or 
-   -90? (LAT_PROJ_ORIGIN set to 90 if STD_PARALLEL > 0, else -90)
+/* 
+   TODO: am not entirely sure how CF-1 latitude_of_projection_origin,
+   that must either be +90 or -90, maps to OGC WKT.
+   Working assumption:
+     'latitude_of_origin' in WKT (latitude of natural origin) -> 'standard_parallel' in CF-1.
+     Then in CF-1 always set 'latitude_of_projection_origin' to +90 or -90, based on sign of WKT
+     'latitude_of_origin'.
+  TODO: Similarly not sure how to handle 'standard_parallel' vs 'scale_factor_at_projection_origin'
+    CF-1 alternatives.
+  Having a clear reference, or sample test data, for CF-1 in this projection would help resolve.
 */
-
 static const oNetcdfSRS_PP poPSmappings[] = {
-    //CF-1 says 'either' of the following attribs can be used to
-    //define the projection, for now read and set both
     {STD_PARALLEL_1, SRS_PP_LATITUDE_OF_ORIGIN},
     {SCALE_FACTOR_ORIGIN, SRS_PP_SCALE_FACTOR},  
     {VERT_LONG_FROM_POLE, SRS_PP_CENTRAL_MERIDIAN},
