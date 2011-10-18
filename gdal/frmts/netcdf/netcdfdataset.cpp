@@ -3109,7 +3109,7 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
     eErr = poSrcDS->GetGeoTransform( adfGeoTransform );
     *szGeoTransform = '\0';
     for( int i=0; i<6; i++ ) {
-        sprintf( szTemp, "%.15g ",
+        sprintf( szTemp, "%.18g ",
                  adfGeoTransform[i] );
         strcat( szGeoTransform, szTemp );
     }
