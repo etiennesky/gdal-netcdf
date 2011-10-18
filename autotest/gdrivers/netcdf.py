@@ -115,24 +115,10 @@ def netcdf_setup():
 
 ###############################################################################
 #test integrity of file copy
-def netcdf_get_simple_wkt( src_ds ):
-
-    src_wkt = src_ds.GetProjection()
-    srs = osr.SpatialReference()
-    srs.ImportFromWkt(src_wkt)
-    #srs.GetRoot().StripNodes( "AXIS" );
-    #srs.GetRoot().StripNodes( "AUTHORITY" );
-    #srs.GetRoot().StripNodes( "EXTENSION" );
-    srs.StripCTParms()
-
-    return (srs.ExportToWkt(), srs.ExportToProj4())
+#NOTE: obsolete, now using GDALTest::testCreateCopy()
 
 def netcdf_test_file_copy( src_file, dst_file, driver_name, create_opts=None,
-    geoT_sig_figs=18):
-
-#    print( 'netcdf_test_file_copy( '+src_file+', '+dst_file+', '+driver_name+' )')
-#    if create_opts is not None:
-#        print( create_opts )
+    geoT_sig_figs=None):
 
     #load driver(s)
     if gdaltest.netcdf_drv is None:
@@ -161,27 +147,37 @@ def netcdf_test_file_copy( src_file, dst_file, driver_name, create_opts=None,
 
     #do some tests
     #print str(src_ds.GetGeoTransform())+'-'+str(dst_ds.GetGeoTransform())
-    srcGeoT = src_ds.GetGeoTransform()
-    dstGeoT = dst_ds.GetGeoTransform()
-    geoTransformSameToSigFigs = True
-    for ii in range(len(srcGeoT)):
-        if not sameToSigFigs(srcGeoT[ii], dstGeoT[ii], geoT_sig_figs):
-            geoTransformSameToSigFigs = False
-            break
+    if geoT_sig_figs is None:
 
-    if not geoTransformSameToSigFigs:
-        print( 'geotransform for '+dst_file+' not within %d sig figs' % geoT_sig_figs )
-        if not gdaltest.netcdf_drv_silent :
-            print( 'src:'+str(src_ds.GetGeoTransform())+ \
-                       "\ndst:"+str(dst_ds.GetGeoTransform()) )
-        result = 'fail'
+        if src_ds.GetGeoTransform() != dst_ds.GetGeoTransform():
+            print( 'Incorrect geotransform for '+dst_file )
+            if not gdaltest.netcdf_drv_silent :
+                print( 'src_gt: '+str(src_ds.GetGeoTransform()) \
+                           + '\ndst_gt: '+str(dst_ds.GetGeoTransform()) )
+            result = 'fail'
+    else:
+        srcGeoT = src_ds.GetGeoTransform()
+        dstGeoT = dst_ds.GetGeoTransform()
+        geoTransformSameToSigFigs = True
+        #geoTransformSameToSigFigs = False
+        for ii in range(len(srcGeoT)):
+            if not netcdf_equal_sig_figs(srcGeoT[ii], dstGeoT[ii], geoT_sig_figs):
+                geoTransformSameToSigFigs = False
+                break
+            
+            if not geoTransformSameToSigFigs:
+                print( 'geotransform for '+dst_file+' not within %d sig figs' % geoT_sig_figs )
+                if not gdaltest.netcdf_drv_silent :
+                    print( 'src:'+str(src_ds.GetGeoTransform())+ \
+                               "\ndst:"+str(dst_ds.GetGeoTransform()) )
+                    result = 'fail'
     
     #get projection in PROJ.4 and WKT format
     (src_wkt, src_proj4) = netcdf_get_simple_wkt(src_ds)
     (dst_wkt, dst_proj4) = netcdf_get_simple_wkt(dst_ds)
 
     #check projection in WKT format - don't cause test to fail, as it can be too stringent
-    #TODO ET - could use IsSameGeogCS() to compare instead, just like in netcdfdataset.cpp
+    #TODO - could use IsSameGeogCS() to compare instead, just like in netcdfdataset.cpp
     #print src_wkt+'-'+dst_wkt
     #if src_wkt != dst_wkt:
         #print('WARNING: Possibly incorrect projection in file '+dst_file)
@@ -212,7 +208,25 @@ def netcdf_test_file_copy( src_file, dst_file, driver_name, create_opts=None,
 
     return result
 
-def sameToSigFigs(val1, val2, sigFigs):
+###############################################################################
+#get a simplified wkt and proj4
+
+def netcdf_get_simple_wkt( src_ds ):
+
+    src_wkt = src_ds.GetProjection()
+    srs = osr.SpatialReference()
+    srs.ImportFromWkt(src_wkt)
+    #srs.GetRoot().StripNodes( "AXIS" );
+    #srs.GetRoot().StripNodes( "AUTHORITY" );
+    #srs.GetRoot().StripNodes( "EXTENSION" );
+    srs.StripCTParms()
+
+    return (srs.ExportToWkt(), srs.ExportToProj4())
+
+
+###############################################################################
+#test that 2 numbers are equal given a number of significant figures
+def netcdf_equal_sig_figs(val1, val2, sigFigs):
     """Small function written to check that va1 is equal to val2 at given
     number of significant figures"""
     import math
@@ -226,6 +240,7 @@ def sameToSigFigs(val1, val2, sigFigs):
     int1 = int(round(std1 * pow(10, sigFigs)))
     int2 = int(round(std2 * pow(10, sigFigs)))
     return int1 == int2
+
 
 
 ###############################################################################
@@ -415,6 +430,8 @@ def netcdf_7():
     
 ###############################################################################
 #check for cf convention read of albers equal area
+# Previous version compared entire wkt, which varies slightly among driver versions
+# now just look for PROJECTION=Albers_Conic_Equal_Area and some parameters
 def netcdf_8():
 
     if gdaltest.netcdf_drv is None:
@@ -422,13 +439,24 @@ def netcdf_8():
 
     ds = gdal.Open( 'data/cf_aea2sp_invf.nc' )
 
-    prj1 = 'PROJCS["unnamed",GEOGCS["unknown",DATUM["unknown",SPHEROID["Spheroid",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Albers_Conic_Equal_Area"],PARAMETER["standard_parallel_1",29.8333333333333],PARAMETER["standard_parallel_2",45.8333333333333],PARAMETER["latitude_of_center",37.5],PARAMETER["longitude_of_center",-96],PARAMETER["false_easting",0],PARAMETER["false_northing",0]]'
-    prj = ds.GetProjection( )
+    srs = osr.SpatialReference( )
+    srs.ImportFromWkt( ds.GetProjection( ) )
 
-    if prj != prj1:
-
-        gdaltest.post_reason( 'Projection does not match expected:\n%s\ngot:\n%s' % ( prj1, prj ) )
+    proj = srs.GetAttrValue( 'PROJECTION' )
+    if  proj != 'Albers_Conic_Equal_Area':
+        gdaltest.post_reason( 'Projection does not match expected : ' + proj )
         return 'fail'
+
+    param = srs.GetProjParm('latitude_of_center')
+    if param != 37.5:
+        gdaltest.post_reason( 'Got wrong parameter value (%g)' % param )
+        return 'fail'
+    
+    param = srs.GetProjParm('longitude_of_center')
+    if param != -96:
+        gdaltest.post_reason( 'Got wrong parameter value (%g)' % param )
+        return 'fail'
+    
 
     ds = None
 
@@ -580,6 +608,7 @@ def netcdf_14():
 
 ###############################################################################
 #check support for netcdf-2 (64 bit)
+# This test fails in 1.8.0, because the driver does not support it
 def netcdf_15():
 
     if gdaltest.netcdf_drv is None:

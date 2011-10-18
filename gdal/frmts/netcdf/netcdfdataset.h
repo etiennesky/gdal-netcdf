@@ -54,7 +54,7 @@
 #define CEA                    "cylindrical_equal_area"
 #define LAEA                   "lambert_azimuthal_equal_area"
 #define LCEA                   "lambert_cylindrical_equal_area"
-#define L_C_CONIC              "lambert_conformal_conic"
+#define LCC                    "lambert_conformal_conic"
 #define TM                     "transverse_mercator"
 #define GRD_MAPPING_NAME       "grid_mapping_name"
 #define GRD_MAPPING            "grid_mapping"
@@ -85,6 +85,7 @@
 #define FALSE_EASTING          "false_easting"
 #define FALSE_NORTHING         "false_northing"
 #define EARTH_RADIUS           "earth_radius"
+#define EARTH_RADIUS_OLD       "spherical_earth_radius_meters"
 #define INVERSE_FLATTENING     "inverse_flattening"
 #define LONG_PRIME_MERIDIAN    "longitude_of_prime_meridian"
 #define SEMI_MAJOR_AXIS        "semi_major_axis"
@@ -516,8 +517,8 @@ static const oNetcdfSRS_PT poNetcdfSRS_PT[] = {
     {"hotine_oblique_mercator_2P", 
      SRS_PT_HOTINE_OBLIQUE_MERCATOR_TWO_POINT_NATURAL_ORIGIN, NULL },
     {"laborde_oblique_mercator", SRS_PT_LABORDE_OBLIQUE_MERCATOR, NULL },
-    {L_C_CONIC, SRS_PT_LAMBERT_CONFORMAL_CONIC_1SP, poLCC1SPMappings },
-    {L_C_CONIC, SRS_PT_LAMBERT_CONFORMAL_CONIC_2SP, poLCC2SPMappings },
+    {LCC, SRS_PT_LAMBERT_CONFORMAL_CONIC_1SP, poLCC1SPMappings },
+    {LCC, SRS_PT_LAMBERT_CONFORMAL_CONIC_2SP, poLCC2SPMappings },
     {LAEA, SRS_PT_LAMBERT_AZIMUTHAL_EQUAL_AREA, poLAEAMappings },
     {MERCATOR, SRS_PT_MERCATOR_1SP, poM1SPMappings },
     {MERCATOR, SRS_PT_MERCATOR_2SP, poM2SPMappings },

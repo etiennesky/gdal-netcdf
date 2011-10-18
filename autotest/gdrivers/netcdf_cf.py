@@ -345,10 +345,11 @@ def netcdf_cfproj_testcopy(projTuples, origTiff, interFormats, inPath, outPath,
     """
 
     silent = True
-#    gdaltest.netcdf_drv_silent = True
-#    bWriteGdalTags="YES"
-    gdaltest.netcdf_drv_silent = False
+    gdaltest.netcdf_drv_silent = True
     bWriteGdalTags="YES"
+    #silent = False
+    gdaltest.netcdf_drv_silent = False
+#    bWriteGdalTags="NO"
 
     result = 'success'
 
@@ -386,6 +387,11 @@ def netcdf_cfproj_testcopy(projTuples, origTiff, interFormats, inPath, outPath,
     dsTiff =  gdal.Open( os.path.join(inPath, origTiff), GA_ReadOnly );
     s_srs_wkt = dsTiff.GetProjection()
 
+    #objects to hold the various tests
+    i_t = 0
+    tst = {}
+    tst_res = {}
+
     for proj in projTuples:
         try:
             intFmt = interFormats[proj[0]]
@@ -394,9 +400,9 @@ def netcdf_cfproj_testcopy(projTuples, origTiff, interFormats, inPath, outPath,
 
         intExt = netcdf_cfproj_format_fnames[intFmt]
 
-        print("")
         # Our little results data structures
         if not silent:
+            print("")
             print("Testing %s (%s) translation:" % (proj[0], proj[1]))
 
         if not silent:
@@ -462,11 +468,18 @@ def netcdf_cfproj_testcopy(projTuples, origTiff, interFormats, inPath, outPath,
         projNc2 = projNc.rstrip('.nc') + '2.nc'
         projRaster2 = os.path.join(outPath, "%s_%s2.%s" % \
             (origTiff.rstrip('.tif'), proj[0], intExt ))
-        result1 = netcdf_test_file_copy( projRaster, projNc2, 'NETCDF', [ 'WRITE_GDAL_TAGS='+bWriteGdalTags ], geoT_sig_figs=11 )
-        #result1 = 'success'
-        result2 = netcdf_test_file_copy( projNc2, projRaster2, intFmt, geoT_sig_figs=11 )
-        if result1 == 'fail' or result2 == 'fail':
+
+#        result1 = netcdf_test_file_copy( projRaster, projNc2, 'NETCDF', [ 'WRITE_GDAL_TAGS='+bWriteGdalTags ], geoT_sig_figs=11 )
+#        result2 = netcdf_test_file_copy( projNc2, projRaster2, intFmt, geoT_sig_figs=11 )
+        tst[i_t+1] = gdaltest.GDALTest( 'NETCDF', '../'+projRaster, 1, None)
+        tst_res[i_t+1] = tst[i_t+1].testCreateCopy(check_gt=1, check_srs=1, new_filename=projNc2, delete_copy = 0,check_minmax = 0, gt_epsilon=pow(10,-8))
+        tst[i_t+2] = gdaltest.GDALTest( intFmt, '../'+projNc2, 1, None )
+        tst_res[i_t+2] = tst[i_t+2].testCreateCopy(check_gt=1, check_srs=1, new_filename=projRaster2, delete_copy = 0,check_minmax = 0, gt_epsilon=pow(10,-8))
+
+        if  tst_res[i_t+1] == 'fail' or tst_res[i_t+2] == 'fail':
             result = 'fail'
+
+        i_t = i_t + 2
 
     resFile.close()
 
@@ -546,9 +559,18 @@ def netcdf_cf_1():
     if gdaltest.netcdf_drv is None:
         return 'skip'
 
-    result = netcdf_test_file_copy( 'data/trmm.tif', 'tmp/netcdf_18.nc', 'NETCDF' )
+#    result = netcdf_test_file_copy( 'data/trmm.tif', 'tmp/netcdf_18.nc', 'NETCDF' )
+#    if result != 'fail':
+#        result = netcdf_test_file_copy( 'tmp/netcdf_18.nc', 'tmp/netcdf_18.tif', 'GTIFF' )
+#    result = netcdf_test_file_copy( 'data/trmm.tif', 'tmp/netcdf_18.nc', 'NETCDF' )
+#    if result != 'fail':
+#        result = netcdf_test_file_copy( 'tmp/netcdf_18.nc', 'tmp/netcdf_18.tif', 'GTIFF' )
+
+    tst1 = gdaltest.GDALTest( 'NETCDF', 'trmm.tif', 1, 14 )
+    result = tst1.testCreateCopy(check_gt=1, check_srs=1, new_filename='tmp/netcdf_cf_1.nc', delete_copy = 0)
     if result != 'fail':
-        result = netcdf_test_file_copy( 'tmp/netcdf_18.nc', 'tmp/netcdf_18.tif', 'GTIFF' )
+        tst2 = gdaltest.GDALTest( 'GTIFF', '../tmp/netcdf_cf_1.nc', 1, 14 )       
+        result = tst2.testCreateCopy(check_gt=1, check_srs=1, new_filename='tmp/netcdf_cf_1.tiff', delete_copy = 0)
 
     result_cf = 'success'
     if gdaltest.netcdf_cf_method is not None:
@@ -567,11 +589,13 @@ def netcdf_cf_2():
     if gdaltest.netcdf_drv is None:
         return 'skip'
 
-    result = netcdf_test_file_copy( 'data/trmm.nc', 'tmp/netcdf_19.nc', 'NETCDF' )
+#    result = netcdf_test_file_copy( 'data/trmm.nc', 'tmp/netcdf_19.nc', 'NETCDF' )
+    tst = gdaltest.GDALTest( 'NETCDF', 'trmm.nc', 1, 14 )
+    result = tst.testCreateCopy(check_gt=1, check_srs=1, new_filename='tmp/netcdf_cf_2.nc', delete_copy = 0)
 
     result_cf = 'success'
     if gdaltest.netcdf_cf_method is not None:
-        result_cf = netcdf_cf_check_file( 'tmp/netcdf_19.nc','auto',False )
+        result_cf = netcdf_cf_check_file( 'tmp/netcdf_cf_2.nc','auto',False )
 
     if result != 'fail' and result_cf != 'fail':
         return 'success'
@@ -581,6 +605,7 @@ def netcdf_cf_2():
 
 ###############################################################################
 #test copy and CF compliance for lat/lon (W*S84) file, tif->nc->tif
+# note: this test fails in trunk (before r23246) 
 def netcdf_cf_3():
 
     if gdaltest.netcdf_drv is None:
@@ -589,14 +614,18 @@ def netcdf_cf_3():
     result = 'success'
     result_cf = 'success'
 
-    result = netcdf_test_file_copy( 'data/trmm-wgs84.tif', 'tmp/netcdf_20.nc', 'NETCDF' )
+#    result = netcdf_test_file_copy( 'data/trmm-wgs84.tif', 'tmp/netcdf_20.nc', 'NETCDF' )
+    tst = gdaltest.GDALTest( 'NETCDF', 'trmm-wgs84.tif', 1, 14 )
+    result = tst.testCreateCopy(check_gt=1, check_srs=1, new_filename='tmp/netcdf_cf_3.nc', delete_copy = 0)
 
     if result == 'success':
-        result = netcdf_test_file_copy( 'tmp/netcdf_20.nc', 'tmp/netcdf_20.tif', 'GTIFF' )
+        #result = netcdf_test_file_copy( 'tmp/netcdf_20.nc', 'tmp/netcdf_20.tif', 'GTIFF' )
+        tst = gdaltest.GDALTest( 'GTIFF', '../tmp/netcdf_cf_3.nc', 1, 14 )
+        result = tst.testCreateCopy(check_gt=1, check_srs=1, new_filename='tmp/netcdf_cf_3.tif', delete_copy = 0)
 
     result_cf = 'success'
     if gdaltest.netcdf_cf_method is not None:
-        result_cf = netcdf_cf_check_file( 'tmp/netcdf_20.nc','auto',False )
+        result_cf = netcdf_cf_check_file( 'tmp/netcdf_cf_3.nc','auto',False )
 
     if result != 'fail' and result_cf != 'fail':
         return 'success'
@@ -621,7 +650,8 @@ gdaltest_list = [
     netcdf_cf_1,
     netcdf_cf_2,
     netcdf_cf_3,
-    netcdf_cf_4 ]
+    netcdf_cf_4,
+    None ]
 
 if __name__ == '__main__':
 
