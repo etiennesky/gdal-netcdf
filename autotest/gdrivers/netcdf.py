@@ -127,7 +127,8 @@ def netcdf_get_simple_wkt( src_ds ):
 
     return (srs.ExportToWkt(), srs.ExportToProj4())
 
-def netcdf_test_file_copy( src_file, dst_file, driver_name, create_opts=None ):
+def netcdf_test_file_copy( src_file, dst_file, driver_name, create_opts=None,
+    geoT_sig_figs=18):
 
 #    print( 'netcdf_test_file_copy( '+src_file+', '+dst_file+', '+driver_name+' )')
 #    if create_opts is not None:
@@ -143,7 +144,7 @@ def netcdf_test_file_copy( src_file, dst_file, driver_name, create_opts=None ):
     result = 'success'
 
     #create copy
-    src_ds = gdal.Open( src_file )
+    src_ds = gdal.Open( src_file, gdal.GA_ReadOnly )
     if src_ds is None:
         gdaltest.post_reason( 'Failed to open src file '+src_file )
         return 'fail'
@@ -154,13 +155,22 @@ def netcdf_test_file_copy( src_file, dst_file, driver_name, create_opts=None ):
     if dst_ds is None:
         gdaltest.post_reason( 'Failed to create dst file '+dst_file )
         return 'fail'
+    #For drivers like HFA, line below makes sure projection is written to file
     dst_ds = None
     dst_ds = gdal.Open( dst_file )
 
     #do some tests
     #print str(src_ds.GetGeoTransform())+'-'+str(dst_ds.GetGeoTransform())
-    if src_ds.GetGeoTransform() != dst_ds.GetGeoTransform():
-        print( 'Incorrect geotransform for '+dst_file )
+    srcGeoT = src_ds.GetGeoTransform()
+    dstGeoT = dst_ds.GetGeoTransform()
+    geoTransformSameToSigFigs = True
+    for ii in range(len(srcGeoT)):
+        if not sameToSigFigs(srcGeoT[ii], dstGeoT[ii], geoT_sig_figs):
+            geoTransformSameToSigFigs = False
+            break
+
+    if not geoTransformSameToSigFigs:
+        print( 'geotransform for '+dst_file+' not within %d sig figs' % geoT_sig_figs )
         if not gdaltest.netcdf_drv_silent :
             print( 'src:'+str(src_ds.GetGeoTransform())+ \
                        "\ndst:"+str(dst_ds.GetGeoTransform()) )
@@ -201,6 +211,22 @@ def netcdf_test_file_copy( src_file, dst_file, driver_name, create_opts=None ):
     #gdaltest.clean_tmp()
 
     return result
+
+def sameToSigFigs(val1, val2, sigFigs):
+    """Small function written to check that va1 is equal to val2 at given
+    number of significant figures"""
+    import math
+    if val1 == 0 or val2 == 0:
+        val1 += 1
+        val2 += 1
+    order1 = int(round(math.log10(abs(val1))))
+    order2 = int(round(math.log10(abs(val2))))
+    std1 = val1/float(pow(10, order1))
+    std2 = val2/float(pow(10, order2))
+    int1 = int(round(std1 * pow(10, sigFigs)))
+    int2 = int(round(std2 * pow(10, sigFigs)))
+    return int1 == int2
+
 
 ###############################################################################
 # Netcdf Tests
