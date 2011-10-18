@@ -344,7 +344,7 @@ def netcdf_cfproj_testcopy(projTuples, origTiff, interFormats, inPath, outPath,
     :arg: resFilename - results filename to write to.
     """
 
-    silent = False
+    silent = True
 #    gdaltest.netcdf_drv_silent = True
 #    bWriteGdalTags="YES"
     gdaltest.netcdf_drv_silent = False
@@ -462,9 +462,9 @@ def netcdf_cfproj_testcopy(projTuples, origTiff, interFormats, inPath, outPath,
         projNc2 = projNc.rstrip('.nc') + '2.nc'
         projRaster2 = os.path.join(outPath, "%s_%s2.%s" % \
             (origTiff.rstrip('.tif'), proj[0], intExt ))
-        result1 = netcdf_test_file_copy( projRaster, projNc2, 'NETCDF', [ 'WRITE_GDAL_TAGS='+bWriteGdalTags ] )
+        result1 = netcdf_test_file_copy( projRaster, projNc2, 'NETCDF', [ 'WRITE_GDAL_TAGS='+bWriteGdalTags ], geoT_sig_figs=11 )
         #result1 = 'success'
-        result2 = netcdf_test_file_copy( projNc2, projRaster2, intFmt )
+        result2 = netcdf_test_file_copy( projNc2, projRaster2, intFmt, geoT_sig_figs=11 )
         if result1 == 'fail' or result2 == 'fail':
             result = 'fail'
 
