@@ -143,7 +143,7 @@ def netcdf_test_file_copy( src_file, dst_file, driver_name, create_opts=None ):
     result = 'success'
 
     #create copy
-    src_ds = gdal.Open( src_file )
+    src_ds = gdal.Open( src_file, gdal.GA_ReadOnly )
     if src_ds is None:
         gdaltest.post_reason( 'Failed to open src file '+src_file )
         return 'fail'
@@ -154,6 +154,7 @@ def netcdf_test_file_copy( src_file, dst_file, driver_name, create_opts=None ):
     if dst_ds is None:
         gdaltest.post_reason( 'Failed to create dst file '+dst_file )
         return 'fail'
+    #For drivers like HFA, line below makes sure projection is written to file
     dst_ds = None
     dst_ds = gdal.Open( dst_file )
 
