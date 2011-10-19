@@ -3880,16 +3880,11 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
             }    
             status = nc_def_var( fpImage, szBandName, nDataType, 
                                  GDALNBDIM, anBandDims, &NCDFVarID );
-            // status = nc_def_var( fpImage, szBandName, NC_BYTE, 
-            //                      GDALNBDIM, anBandDims, &NCDFVarID );
             if ( nCompress == NCDF_COMPRESS_DEFLATE ) {
                 //size_t chunksize[2] = {nXSize,1};
                 status = nc_def_var_deflate(fpImage, NCDFVarID,1,1,nZLevel);
                 if (status != NC_NOERR) {
                     fprintf(stderr, "%s\n", nc_strerror(status));
-                }    
-                else {
-                    printf("compress ok\n");
                 }    
                 // PDS: disable manual chunking control for now
                 // status = nc_def_var_chunking( fpImage, NCDFVarID, 
@@ -3922,8 +3917,7 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 /*      Write data line per line                                        */
 /* -------------------------------------------------------------------- */
 
-            /* ET todo remove nBands from all CPLMalloc */
-            pabScanline = (GByte *) CPLMalloc( nBands * nXSize );
+            pabScanline = (GByte *) CPLMalloc( 1 * nXSize * sizeof(GByte) );
             
             for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
 
@@ -3954,8 +3948,8 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 /* -------------------------------------------------------------------- */
 /*      Put NetCDF file back in define mode.                            */
 /* -------------------------------------------------------------------- */
-            status = nc_redef( fpImage );
             CPLFree( pabScanline );
+            status = nc_redef( fpImage );
 /* -------------------------------------------------------------------- */
 /*      Int16                                                           */
 /* -------------------------------------------------------------------- */
@@ -3969,8 +3963,6 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
             if ( nCompress == NCDF_COMPRESS_DEFLATE )
                 status = nc_def_var_deflate(fpImage, NCDFVarID,1,1,nZLevel);
 
-            pasScanline = (GInt16 *) CPLMalloc( nBands * nXSize *
-                                                sizeof( GInt16 ) );
 /* -------------------------------------------------------------------- */
 /*      Write Fill Value                                                */
 /* -------------------------------------------------------------------- */
@@ -3983,6 +3975,8 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                               &nsNoDataValue );
 
             status = nc_enddef( fpImage );
+            pasScanline = (GInt16 *) CPLMalloc( 1 * nXSize *
+                                                sizeof( GInt16 ) );
             for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
 
                 eErr = poSrcBand->RasterIO( GF_Read, 0, iLine, nXSize, 1, 
@@ -4001,8 +3995,8 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                 status = nc_put_vara_short( fpImage, NCDFVarID, start,
                                             count, pasScanline);
             }
-            status = nc_redef( fpImage );
             CPLFree( pasScanline );
+            status = nc_redef( fpImage );
 /* -------------------------------------------------------------------- */
 /*      Int32                                                           */
 /* -------------------------------------------------------------------- */
@@ -4012,12 +4006,9 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 
             status = nc_def_var( fpImage, szBandName, NC_INT, 
                                  GDALNBDIM, anBandDims, &NCDFVarID );
-
             if ( nCompress == NCDF_COMPRESS_DEFLATE )
                 status = nc_def_var_deflate(fpImage, NCDFVarID,1,1,nZLevel);
 
-            panScanline = (GInt32 *) CPLMalloc( nBands * nXSize *
-                                                sizeof( GInt32 ) );
 /* -------------------------------------------------------------------- */
 /*      Write Fill Value                                                */
 /* -------------------------------------------------------------------- */
@@ -4030,6 +4021,8 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                             1,
                             &nlNoDataValue );
             status = nc_enddef( fpImage );
+            panScanline = (GInt32 *) CPLMalloc( 1 * nXSize *
+                                                sizeof( GInt32 ) );
             for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
 
                 eErr = poSrcBand->RasterIO( GF_Read, 0, iLine, nXSize, 1, 
@@ -4048,8 +4041,8 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                 status = nc_put_vara_int( fpImage, NCDFVarID, start,
                                           count, panScanline);
             }
-            status = nc_redef( fpImage );
             CPLFree( panScanline );
+            status = nc_redef( fpImage );
 /* -------------------------------------------------------------------- */
 /*      float                                                           */
 /* -------------------------------------------------------------------- */
@@ -4058,12 +4051,9 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 
             status = nc_def_var( fpImage, szBandName, NC_FLOAT, 
                                  GDALNBDIM, anBandDims, &NCDFVarID );
-
             if ( nCompress == NCDF_COMPRESS_DEFLATE )
                 status = nc_def_var_deflate(fpImage, NCDFVarID,1,1,nZLevel);
 
-            pafScanline = (float *) CPLMalloc( nBands * nXSize *
-                                               sizeof( float ) );
 
 /* -------------------------------------------------------------------- */
 /*      Write Fill Value                                                */
@@ -4077,6 +4067,8 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                               &fNoDataValue );
 			   
             status = nc_enddef( fpImage );
+            pafScanline = (float *) CPLMalloc( 1 * nXSize *
+                                               sizeof( float ) );
             for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
 
                 eErr = poSrcBand->RasterIO( GF_Read, 0, iLine, nXSize, 1, 
@@ -4092,12 +4084,11 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                 count[0]=1;
                 count[1]=nXSize;
 
-
                 status = nc_put_vara_float( fpImage, NCDFVarID, start,
                                             count, pafScanline);
             }
-            status = nc_redef( fpImage );
             CPLFree( pafScanline );
+            status = nc_redef( fpImage );
 /* -------------------------------------------------------------------- */
 /*      double                                                          */
 /* -------------------------------------------------------------------- */
@@ -4110,8 +4101,6 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
             if ( nCompress == NCDF_COMPRESS_DEFLATE )
                 status = nc_def_var_deflate(fpImage, NCDFVarID,1,1,nZLevel);
 
-            padScanline = (double *) CPLMalloc( nBands * nXSize *
-                                                sizeof( double ) );
 
 /* -------------------------------------------------------------------- */
 /*      Write Fill Value                                                */
@@ -4123,8 +4112,10 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                                NC_DOUBLE,
                                1,
                                &dfNoDataValue );
-
             status = nc_enddef( fpImage );
+
+            padScanline = (double *) CPLMalloc( 1 * nXSize *
+                                                sizeof( double ) );
             for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
 
                 eErr = poSrcBand->RasterIO( GF_Read, 0, iLine, nXSize, 1, 
@@ -4144,8 +4135,8 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                 status = nc_put_vara_double( fpImage, NCDFVarID, start,
                                              count, padScanline);
             }
-            status = nc_redef( fpImage );
             CPLFree( padScanline );
+            status = nc_redef( fpImage );
         }
 	
 /* -------------------------------------------------------------------- */
