@@ -38,6 +38,8 @@ CPL_CVSID("$Id$");
 
 #include "ogr_spatialref.h"
 
+static char szGDALCommandArgsComplete[1024];
+
 /************************************************************************/
 /*                           __pure_virtual()                           */
 /*                                                                      */
@@ -2343,6 +2345,9 @@ GDALGeneralCmdLineProcessor( int nArgc, char ***ppapszArgv, int nOptions )
 
     (void) nOptions;
     
+    /* save the complete argv to szGDALCommandArgsComplete */
+    GDALSetCmdLine( nArgc, *ppapszArgv ) ;
+
 /* -------------------------------------------------------------------- */
 /*      Preserve the program name.                                      */
 /* -------------------------------------------------------------------- */
@@ -2672,6 +2677,46 @@ GDALGeneralCmdLineProcessor( int nArgc, char ***ppapszArgv, int nOptions )
     *ppapszArgv = papszReturn;
 
     return CSLCount( *ppapszArgv );
+}
+
+void GDALSetCmdLine1( int argc, char ** argv, char *dargv )
+{
+    /* code taken from cdo commandline.c */
+    int iarg;
+    char *pargv;
+    size_t len, offset = 0;
+    
+    for ( iarg = 0; iarg < argc; iarg++ )
+    {
+        if ( iarg == 0 )
+        {
+            pargv = strrchr(argv[iarg], '/');
+            if ( pargv == 0 ) pargv = argv[0];
+            else              pargv++;
+        }
+        else
+            pargv = argv[iarg];
+
+        len = strlen(pargv);
+        if ( offset+len+1 > 1024 ) break;
+        memcpy(dargv+offset, pargv, len);
+        offset += len;
+        dargv[offset] = ' ';
+        offset++;
+    }
+
+    dargv[offset-1] = '\0';
+
+};
+
+void GDALSetCmdLine(int argc, char ** argv )
+{
+    GDALSetCmdLine1( argc, argv, szGDALCommandArgsComplete );
+}
+
+char * GDALGetCmdLine( )
+{
+    return szGDALCommandArgsComplete;
 }
 
 
@@ -3076,6 +3121,7 @@ int GDALCheckBandCount( int nBands, int bIsZeroAllowed )
     }
     return TRUE;
 }
+
 
 CPL_C_END
 

@@ -43,6 +43,7 @@ void NCDFWriteProjAttribs(const OGR_SRSNode *poPROJCS,
                             const char* pszProjection,
                             const int fpImage, const int NCDFVarID);
 
+int NCDFIsVersionGTE(const char* pszVersion, int nTarget);
 
 /************************************************************************/
 /*                         MISC Notes                                   */
@@ -1000,12 +1001,14 @@ void netCDFDataset::SetProjection( int var )
 /*      Was this file created by the GDAL netcdf driver?                */
 /*      Was this file created by the newer (CF-conformant) driver?      */
 /* -------------------------------------------------------------------- */
-/* 1) If GDAL netcdf metadata is set, it was created with the new driver*/
+/* 1) If GDAL netcdf metadata is set, and version >= 1.9,               */
+/*    it was created with the new driver                                */
 /* 2) Else, if spatial_ref and GeoTransform are present in the          */
 /*    grid_mapping variable, it was created by the old driver           */
 /* -------------------------------------------------------------------- */
     pszValue = CSLFetchNameValue(poDS->papszMetadata, "NC_GLOBAL#GDAL");
-    if( pszValue ) {
+
+   if( pszValue && NCDFIsVersionGTE(pszValue, 1900)) {
         bIsGdalFile = TRUE;
         bIsGdalCfFile = TRUE;
     }
@@ -2914,7 +2917,7 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
                          "Conventions", 
                          strlen(NCDF_CONVENTIONS_CF),
                          NCDF_CONVENTIONS_CF ); 
-        
+
         nc_put_att_text( fpImage, 
                          NC_GLOBAL, 
                          "GDAL", 
@@ -3218,9 +3221,9 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 /* -------------------------------------------------------------------- */
     CopyMetadata((void *) poSrcDS, fpImage, NC_GLOBAL );
 
-    #ifdef GDAL_SET_CMD_LINE
-    if ( ! EQUAL(GDALGetCmdLine(TRUE), "" ) )
-        strcpy( szTemp, GDALGetCmdLine(TRUE) );
+    #ifdef GDAL_SET_CMD_LINE_DEFINED
+    if ( ! EQUAL(GDALGetCmdLine(), "" ) )
+        strcpy( szTemp, GDALGetCmdLine() );
     else
         sprintf( szTemp, "GDAL NCDFCreateCopy( %s, ... )",pszFilename );
     #else
@@ -4383,6 +4386,35 @@ void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist)
     CPLFree(pszNewHist);
 }
 
+/* Test for GDAL version string >= target */
+/* Valid strings are "GDAL 1.9dev, released 2011/01/18", "GDAL 1.8.1 " */
+int NCDFIsVersionGTE(const char* pszVersion, int nTarget)
+{
+    int nVersion = 0;
+    int nVersions [] = {0,0,0,0};
+    char **papszTokens;
+
+    if ( pszVersion == NULL || EQUAL( pszVersion, "" ) )
+        return FALSE;
+    else if ( ! EQUALN("GDAL ", pszVersion, 5) )
+        return FALSE;
+    else if ( EQUALN("GDAL 1.9dev", pszVersion,11 ) )
+        return nTarget <= 1900;
+    else if ( EQUALN("GDAL 1.8dev", pszVersion,11 ) )
+        return nTarget <= 1800;
+
+    papszTokens = CSLTokenizeString2( pszVersion+5, ".", 0 );
+
+    for ( int iToken = 0; papszTokens && papszTokens[iToken]; iToken++ )  {
+        nVersions[iToken] = atoi( papszTokens[iToken] );
+    }
+    //(GDAL_VERSION_MAJOR*1000+GDAL_VERSION_MINOR*100+GDAL_VERSION_REV*10+GDAL_VERSION_BUILD)
+    nVersion = nVersions[0]*1000 + nVersions[1]*100 + 
+        nVersions[2]*10 + nVersions[3]; 
+    
+    CSLDestroy( papszTokens );
+    return nTarget <= nVersion;
+}
 
     
 

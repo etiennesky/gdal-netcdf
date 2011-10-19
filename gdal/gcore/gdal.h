@@ -550,6 +550,9 @@ void CPL_DLL CPL_STDCALL GDALARUnlockBuffer(GDALAsyncReaderH hARIO);
 /* -------------------------------------------------------------------- */
 int CPL_DLL CPL_STDCALL GDALGeneralCmdLineProcessor( int nArgc, char ***ppapszArgv, 
                                          int nOptions );
+#define GDAL_SET_CMD_LINE_DEFINED
+void CPL_DLL CPL_STDCALL GDALSetCmdLine( int argc, char ** argv );
+char CPL_DLL * CPL_STDCALL GDALGetCmdLine( );
 void CPL_DLL CPL_STDCALL GDALSwapWords( void *pData, int nWordSize, int nWordCount,
                             int nWordSkip );
 void CPL_DLL CPL_STDCALL 
