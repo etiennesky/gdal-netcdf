@@ -3224,6 +3224,7 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
             CPLError( CE_Warning, CPLE_AppDefined, 
                       "WARNING - creating geographic file without lon/lat values!");
             if ( bSourceHasGeoTransform ) 
+                bWriteGdalTags = TRUE; //not desireable if no geotransform
             pszLonDimName = NCDF_DIMNAME_X;
             pszLatDimName = NCDF_DIMNAME_Y;
             // bBottomUp = FALSE; 
