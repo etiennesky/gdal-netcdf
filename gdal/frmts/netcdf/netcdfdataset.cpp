@@ -2965,7 +2965,7 @@ WRITE_GDAL_TAGS=YES/NO/IF_NEEDED (default: YES)
 WRITE_BOTTOMUP=YES/NO (default: YES)
 COMPRESS=NONE/DEFLATE/PACKED (default: NONE)
 ZLEVEL=[1-9] (default: 6)
-FILETYPE=NC/NC2/NC4 (COMPRESS=DEFLATE sets FILETYPE=NC4)
+FILETYPE=NC/NC2/NC4/NC4C (COMPRESS=DEFLATE sets FILETYPE=NC4C)
 
 Config Options:
 
@@ -3113,9 +3113,7 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
             nFileType = NCDF_FILETYPE_NC4;
         }    
         else if ( EQUAL( pszValue, "NC4C" ) ) {
-            CPLError( CE_Warning, CPLE_NotSupported,
-                      "WARNING: Filetype NC4C not supported");
-            nFileType = NCDF_FILETYPE_NC4;
+            nFileType = NCDF_FILETYPE_NC4C;
         }    
         else {
             CPLError( CE_Failure, CPLE_AppDefined,
@@ -3134,10 +3132,10 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
         }
         else if ( EQUAL( pszValue, "DEFLATE" ) ) {
             nCompress = NCDF_COMPRESS_DEFLATE;
-            if ( nFileType != NCDF_FILETYPE_NC4 ) {
+            if ( !((nFileType == NCDF_FILETYPE_NC4) || (nFileType == NCDF_FILETYPE_NC4C)) ) {
                 CPLError( CE_Warning,  CPLE_None,
-                          "NOTICE: Filetype set to NC4 because compression is set to DEFLATE." );
-                nFileType = NCDF_FILETYPE_NC4;
+                          "NOTICE: Filetype set to NC4C because compression is set to DEFLATE." );
+                nFileType = NCDF_FILETYPE_NC4C;
             }
         }
         else if ( EQUAL( pszValue, "SZIP" ) ) {
@@ -3865,11 +3863,15 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 
         dfNoDataValue = poSrcBand->GetNoDataValue(0);
 
+/* -------------------------------------------------------------------- */
+/*      Byte                                                            */
+/* -------------------------------------------------------------------- */
         if( eDT == GDT_Byte ) {
             CPLDebug( "GDAL_netCDF", "%s = GDT_Byte ", szBandName );
 
-            if ( nFileType == NCDF_FILETYPE_NC4 ||
-                 nFileType == NCDF_FILETYPE_NC4C ) {
+            if ( nFileType == NCDF_FILETYPE_NC4 ) {
+                /* PDS: Note: don't use NC_UBYTE if NC4 Classic, since
+                   need to stick to classic NC3 datatypes in that case */
                 nDataType = NC_UBYTE;
             }    
             else {
