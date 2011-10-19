@@ -4333,10 +4333,6 @@ void GDALRegister_netCDF()
 }
 
 /* code taken from cdo and libcdi, used for writing the history attribute */
-/* TODO: there is a bug in this function when used on a new file */
-/* this doesn't happen when CreateCopy() is done with an existing file */
-/* e.g. :history = "Wed Oct 19 18:15:34 2011: GDAL NCDFCreateCopy( landsat-vr3.nc, ... )\0006" ; */
-
 //void cdoDefHistory(int fileID, char *histstring)
 void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist)
 {
@@ -4366,7 +4362,7 @@ void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist)
     //                           "history", pszOldHist );
     // printf("status: %d pszOldHist: [%s]\n",status,pszOldHist);
     
-    nNewHistSize = strlen(pszOldHist)+strlen(strtime)+strlen(pszAddHist)+2;
+    nNewHistSize = strlen(pszOldHist)+strlen(strtime)+strlen(pszAddHist)+1;
     pszNewHist = (char *) CPLMalloc(nNewHistSize * sizeof(char));
     
     strcpy(pszNewHist, strtime);
