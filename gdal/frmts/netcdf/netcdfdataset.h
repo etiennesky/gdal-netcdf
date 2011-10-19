@@ -110,6 +110,14 @@
 #define NCDF_FILETYPE_HDF5            5   
 #define NCDF_FILETYPE_UNKNOWN         10  /* Filetype not determined (yet) */
 
+/* compression */
+#define NCDF_COMPRESS_NONE            0   
+/* http://www.unidata.ucar.edu/software/netcdf/docs/BestPractices.html#Packed%20Data%20Values */
+#define NCDF_COMPRESS_PACKED          1  /* TODO */
+#define NCDF_COMPRESS_DEFLATE         2   
+#define NCDF_DEFLATE_LEVEL            1  /* best time/size ratio */  
+#define NCDF_COMPRESS_SZIP            3  /* no support for writting */ 
+
 /* new defs */
 #define NCDF_DIMNAME_X                "x"
 #define NCDF_DIMNAME_Y                "y"
