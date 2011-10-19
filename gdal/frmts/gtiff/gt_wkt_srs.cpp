@@ -702,7 +702,7 @@ char *GTIFGetOGISDefn( GTIF *hGTIF, GTIFDefn * psDefn )
             break;
 
           case CT_Stereographic:
-            oSRS.SetOS( adfParm[0], adfParm[1],
+            oSRS.SetStereographic( adfParm[0], adfParm[1],
                         adfParm[4],
                         adfParm[5], adfParm[6] );
             break;
