@@ -1918,6 +1918,8 @@ void netCDFDataset::SetProjection( int var )
 /* -------------------------------------------------------------------- */
             if ( !bGotGeoTransform ) {
 
+                /* TODO read the GT values and detect for conflict with CF */
+                /* this could resolve the GT precision loss issue  */
             if( pszGeoTransform != NULL ) {
                 papszGeoTransform = CSLTokenizeString2( pszGeoTransform,
                                                         " ", 
@@ -3068,10 +3070,10 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
     eErr = poSrcDS->GetGeoTransform( adfGeoTransform );
     *szGeoTransform = '\0';
     for( int i=0; i<6; i++ ) {
-        // sprintf( szTemp, "%.18g ",
-        //          adfGeoTransform[i] );
-        sprintf( szTemp, "%.15g ",
+        sprintf( szTemp, "%.18g ",
                  adfGeoTransform[i] );
+        // sprintf( szTemp, "%.15g ",
+        //          adfGeoTransform[i] );
         strcat( szGeoTransform, szTemp );
     }
     CPLDebug( "GDAL_netCDF", "szGeoTranform = %s", szGeoTransform );
@@ -3304,12 +3306,15 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                              NCDF_SPATIAL_REF,
                              strlen( pszWKT ),
                              pszWKT );
-            /* with an option to not write XY we should write the geotransform */
-            // nc_put_att_text( fpImage, 
-            //                  NCDFVarID, 
-            //                  "GeoTransform",
-            //                  strlen( szGeoTransform ),
-            //                  szGeoTransform );
+            /* for now write the geotransform for back-compat */
+            /* the old (1.8.1) driver overrides the CF geotransform with */
+            /* empty values from dfNN, dfSN, dfEE, dfWE; */
+            /* with an option to not write XY we should write the geotransform */           
+            nc_put_att_text( fpImage, 
+                             NCDFVarID, 
+                             "GeoTransform",
+                             strlen( szGeoTransform ),
+                             szGeoTransform );
         }
 
 /* -------------------------------------------------------------------- */
