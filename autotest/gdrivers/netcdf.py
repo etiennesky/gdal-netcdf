@@ -536,7 +536,7 @@ def netcdf_17():
     if gdaltest.netcdf_drv is None:
         return 'skip'
 
-    ifile = 'data/u8be.h5'
+    ifile = 'data/groups.h5'
 
     #skip test if Hdf5 is not enabled
     if gdal.GetDriverByName( 'HDF5' ) is None and \
