@@ -3218,7 +3218,15 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 /* -------------------------------------------------------------------- */
     CopyMetadata((void *) poSrcDS, fpImage, NC_GLOBAL );
 
+    #ifdef GDAL_SET_CMD_LINE
+    if ( ! EQUAL(GDALGetCmdLine(TRUE), "" ) )
+        strcpy( szTemp, GDALGetCmdLine(TRUE) );
+    else
+        sprintf( szTemp, "GDAL NCDFCreateCopy( %s, ... )",pszFilename );
+    #else
     sprintf( szTemp, "GDAL NCDFCreateCopy( %s, ... )",pszFilename );
+    #endif
+
     NCDFAddHistory( fpImage, 
                     szTemp, 
                     poSrcDS->GetMetadataItem("NC_GLOBAL#history","") );
@@ -3733,7 +3741,8 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
         size_t    start[ GDALNBDIM ];
         size_t    count[ GDALNBDIM ];
         double    dfNoDataValue;
-        unsigned char      cNoDataValue;
+        // unsigned char      cNoDataValue;
+        signed char      cNoDataValue;
         float     fNoDataValue;
         int       nlNoDataValue;
         short     nsNoDataValue;
@@ -3784,6 +3793,30 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 /* -------------------------------------------------------------------- */
 /*      Write data line per line                                        */
 /* -------------------------------------------------------------------- */
+/* -------------------------------------------------------------------- */
+/*      Write Fill Value                                                */
+/* -------------------------------------------------------------------- */
+                
+            cNoDataValue=( signed char) dfNoDataValue;
+            status=nc_put_att_schar( fpImage,
+                                     NCDFVarID,
+                                     _FillValue,
+                                     NC_BYTE,
+                                     1,
+                                     &cNoDataValue );
+            /* add valid_range and _Unsigned = "true" to specify unsigned byte
+               http://www.unidata.ucar.edu/software/netcdf/docs/BestPractices.html#Unsigned
+               http://cf-pcmdi.llnl.gov/documents/cf-conventions/1.5/cf-conventions.html#id2859230
+               http://www.unidata.ucar.edu/software/netcdf/docs/netcdf.html#Attribute-Conventions
+            */
+            short int nValidRange[] = {0,255};
+            status=nc_put_att_short( fpImage, NCDFVarID,
+                                     "valid_range",
+                                     NC_SHORT, 2,
+                                     nValidRange );
+            status = nc_put_att_text( fpImage, NCDFVarID,
+                                      "_Unsigned",
+                                      4, "true" );
 
             /* ET todo remove nBands from all CPLMalloc */
             pabScanline = (GByte *) CPLMalloc( nBands * nXSize );
@@ -3797,17 +3830,6 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                                             pabScanline, nXSize, 1, GDT_Byte,
                                             0,0);
 
-/* -------------------------------------------------------------------- */
-/*      Write Fill Value                                                */
-/* -------------------------------------------------------------------- */
-                
-                cNoDataValue=(unsigned char) dfNoDataValue;
-                nc_put_att_uchar( fpImage,
-                                  NCDFVarID,
-                                  _FillValue,
-                                  NC_CHAR,
-                                  1,
-                                  &cNoDataValue );
 			   
 /* -------------------------------------------------------------------- */
 /*      Write Data from Band i                                          */
@@ -3855,6 +3877,7 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                               NC_SHORT,
                               1,
                               &nsNoDataValue );
+            status = nc_enddef( fpImage );
 
             for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
 
@@ -3871,12 +3894,14 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
                 count[1]=nXSize;
 
 
-                status = nc_enddef( fpImage );
+                // status = nc_enddef( fpImage );
                 status = nc_put_vara_short( fpImage, NCDFVarID, start,
                                             count, pasScanline);
-                status = nc_redef( fpImage );
+                // status = nc_redef( fpImage );
             }
             CPLFree( pasScanline );
+                status = nc_redef( fpImage );
+
 /* -------------------------------------------------------------------- */
 /*      Int32                                                           */
 /* -------------------------------------------------------------------- */
@@ -4308,6 +4333,10 @@ void GDALRegister_netCDF()
 }
 
 /* code taken from cdo and libcdi, used for writing the history attribute */
+/* TODO: there is a bug in this function when used on a new file */
+/* this doesn't happen when CreateCopy() is done with an existing file */
+/* e.g. :history = "Wed Oct 19 18:15:34 2011: GDAL NCDFCreateCopy( landsat-vr3.nc, ... )\0006" ; */
+
 //void cdoDefHistory(int fileID, char *histstring)
 void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist)
 {
@@ -4318,6 +4347,7 @@ void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist)
     char *pszNewHist = NULL;
     size_t nNewHistSize = 0;
     int disableHistory = FALSE;
+    int status;
 
     /* Check pszOldHist - as if there was no previous history, it will be
        a null pointer - if so set as empty. */
@@ -4349,10 +4379,11 @@ void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist)
         strcat(pszNewHist, pszOldHist);
     }
 
-    nc_put_att_text( fpImage, NC_GLOBAL, 
-                     "history", nNewHistSize,
-                     pszNewHist ); 
-  
+    status = nc_put_att_text( fpImage, NC_GLOBAL, 
+                              "history", nNewHistSize,
+                              pszNewHist ); 
+    NCDF_ERR(status);
+
     CPLFree(pszNewHist);
 }
 

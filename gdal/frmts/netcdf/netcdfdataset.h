@@ -123,7 +123,9 @@
 #define NCDF_UNITS_M                  "metre"// should be SRS_UL_METER but use meter now for compat with gtiff files
 #define NCDF_UNITS_D                  SRS_UA_DEGREE
 
-#define NCDF_
+/* ugly, how can we put in one line? */
+//#define NCDF_ERR(status)  ( if ( status != NC_NOERR ) { CPLError( CE_Failure, CPLE_AppDefined, "netcdf error #%d : %s .\n", status, nc_strerror(status) ); } ) 
+void NCDF_ERR(int status)  { if ( status != NC_NOERR ) { CPLError( CE_Failure, CPLE_AppDefined, "netcdf error #%d : %s .\n", status, nc_strerror(status) ); } } 
 
 
 /* Following are a series of mappings from CF-1 convention parameters
