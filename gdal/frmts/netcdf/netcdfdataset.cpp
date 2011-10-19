@@ -1212,11 +1212,11 @@ void netCDFDataset::SetProjection( int var )
 
                 if( papszStdParallels != NULL ) {
 
-                    /* TODO CF-1 standard says it allows AEA to be encoded with only 1 standard parallel */
-                    /* how should this actually map to a 2StdP OGC WKT version? */
-                    CPLError( CE_Warning, CPLE_NotSupported, 
-                              "NetCDF driver import of AEA-1SP is not tested, using identical std. parallels\n" );
                     if ( CSLCount( papszStdParallels ) == 1 ) {
+                        /* TODO CF-1 standard says it allows AEA to be encoded with only 1 standard parallel */
+                        /* how should this actually map to a 2StdP OGC WKT version? */
+                        CPLError( CE_Warning, CPLE_NotSupported, 
+                                  "NetCDF driver import of AEA-1SP is not tested, using identical std. parallels\n" );
                         dfStdP1 = CPLAtofM( papszStdParallels[0] );
                         dfStdP2 = dfStdP1;
                     }
