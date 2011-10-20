@@ -1365,7 +1365,7 @@ void netCDFDataset::SetProjection( int var )
                 if( papszStdParallels != NULL ) {
 		  
                    if ( CSLCount( papszStdParallels ) == 1 ) {
-                       /* this is not CF!!! */
+                       /* TODO - this is not CF!!! */
                        dfScale = 
                            poDS->FetchCopyParm( szGridMappingValue, 
                                                 SCALE_FACTOR, 1.0 );
@@ -1373,7 +1373,7 @@ void netCDFDataset::SetProjection( int var )
                        dfStdP2 = dfStdP1;
                         /* should use dfStdP1 and dfStdP2 instead of dfScale */ 
                        CPLError( CE_Warning, CPLE_NotSupported, 
-                                   "NetCDF driver import of LCC-1SP is not tested, using SetLCC1SP()\n" );
+                                   "NetCDF driver import of LCC-1SP is not tested nor supported, using SetLCC1SP()\n" );
                        oSRS.SetLCC1SP( dfCenterLat, dfCenterLon, dfScale, 
                                        dfFalseEasting, dfFalseNorthing );
                     }
@@ -3476,8 +3476,8 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         status = nc_def_var( fpImage, NCDF_DIMNAME_X, NC_DOUBLE, 
                              1, anXDims, &NCDFVarID );
         nc_put_att_text( fpImage, NCDFVarID, NCDF_STD_NAME,
-                         strlen("projection_x_coordinate"),
-                         "projection_x_coordinate" );
+                         strlen(PROJ_X_ORIGIN),
+                         PROJ_X_ORIGIN );
         nc_put_att_text( fpImage, NCDFVarID, NCDF_LNG_NAME,
                          strlen("x coordinate of projection"),
                          "x coordinate of projection" );
@@ -3506,8 +3506,8 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         status = nc_def_var( fpImage, NCDF_DIMNAME_Y, NC_DOUBLE, 
                              1, anYDims, &NCDFVarID );
         nc_put_att_text( fpImage, NCDFVarID, NCDF_STD_NAME,
-                         strlen("projection_y_coordinate"),
-                         "projection_y_coordinate" );
+                         strlen(PROJ_Y_ORIGIN),
+                         PROJ_Y_ORIGIN );
         nc_put_att_text( fpImage, NCDFVarID, NCDF_LNG_NAME,
                          strlen("y coordinate of projection"),
                          "y coordinate of projection" );
@@ -3632,13 +3632,13 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
             int anLatDims[2];
             anLatDims[0] = nYDimID;
             anLatDims[1] = nXDimID;
-            status = nc_def_var( fpImage, "lat", eLonLatType, 
+            status = nc_def_var( fpImage, NCDF_DIMNAME_LAT, eLonLatType, 
                                  2, anLatDims, &NCDFVarID );
         }
         else {
             int anLatDims[1];
             anLatDims[0] = nLatDimID;
-            status = nc_def_var( fpImage, "lat", eLonLatType, 
+            status = nc_def_var( fpImage, NCDF_DIMNAME_LAT, eLonLatType, 
                                  1, anLatDims, &NCDFVarID );                  
         }
         status=nc_put_att_text( fpImage, NCDFVarID, NCDF_STD_NAME,
@@ -3672,13 +3672,13 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
             int anLonDims[2];
             anLonDims[0] = nYDimID;
             anLonDims[1] = nXDimID;
-            status = nc_def_var( fpImage, "lon", eLonLatType, 
+            status = nc_def_var( fpImage, NCDF_DIMNAME_LON, eLonLatType, 
                                  2, anLonDims, &NCDFVarID );
         }
         else {
             int anLonDims[1];
             anLonDims[0] = nLonDimID;
-            status = nc_def_var( fpImage, "lon", eLonLatType, 
+            status = nc_def_var( fpImage, NCDF_DIMNAME_LON, eLonLatType, 
                                  1, anLonDims, &NCDFVarID );
         }
         nc_put_att_text( fpImage, NCDFVarID, NCDF_STD_NAME,

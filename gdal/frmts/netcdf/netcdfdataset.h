@@ -41,14 +41,74 @@
 
 /************************************************************************/
 /* ==================================================================== */
-/*			     netCDFDataset				*/
+/*			     defines    		                             		*/
 /* ==================================================================== */
 /************************************************************************/
 
-#define MAX_STR_LEN            8192
+/* -------------------------------------------------------------------- */
+/*      Various defines                                                 */
+/* -------------------------------------------------------------------- */
 
-/* Useful defines of CF-1 convention standard variables related to mapping
- * & projection - see http://cf-pcmdi.llnl.gov/ */
+/* GDAL or driver defs */
+#define MAX_STR_LEN           8192
+#define NCDF_CONVENTIONS_CF  "CF-1.5"
+#define NCDF_GDAL             GDALVersionInfo("--version")
+#define NCDF_NBDIM           2
+#define NCDF_SPATIAL_REF     "spatial_ref"
+#define NCDF_GEOTRANSFORM    "GeoTransform"
+#define NCDF_DIMNAME_X       "x"
+#define NCDF_DIMNAME_Y       "y"
+#define NCDF_DIMNAME_LON     "lon"
+#define NCDF_DIMNAME_LAT     "lat"
+
+/* CF defs */
+#define NCDF_STD_NAME        "standard_name"
+#define NCDF_LNG_NAME        "long_name"
+#define NCDF_UNITS           "units"
+/* #define NCDF_AXIS            "axis" */
+/* #define NCDF_BOUNDS          "bounds" */
+/* #define NCDF_ORIG_UNITS      "original_units" */
+#define NCDF_ADD_OFFSET      "add_offset"
+#define NCDF_SCALE_FACTOR    "scale_factor"
+/* should be SRS_UL_METER but use meter now for compat with gtiff files */
+#define NCDF_UNITS_M         "metre"
+#define NCDF_UNITS_D         SRS_UA_DEGREE
+
+/* netcdf file types, as in libcdi/cdo and compat w/netcdf.h */
+#define NCDF_FILETYPE_NONE            0   /* Not a netCDF file */
+#define NCDF_FILETYPE_NC              1   /* File type netCDF */
+#define NCDF_FILETYPE_NC2             2   /* File type netCDF version 2 (64-bit)  */
+#define NCDF_FILETYPE_NC4             3   /* File type netCDF version 4           */
+#define NCDF_FILETYPE_NC4C            4   /* File type netCDF version 4 (classic) - not used yet */
+/* File type HDF5, not supported here (lack of netCDF-4 support or extension is not .nc or .nc4 */
+#define NCDF_FILETYPE_HDF5            5   
+#define NCDF_FILETYPE_UNKNOWN         10  /* Filetype not determined (yet) */
+
+/* compression parameters */
+#define NCDF_COMPRESS_NONE            0   
+/* TODO */
+/* http://www.unidata.ucar.edu/software/netcdf/docs/BestPractices.html#Packed%20Data%20Values */
+#define NCDF_COMPRESS_PACKED          1  
+#define NCDF_COMPRESS_DEFLATE         2   
+#define NCDF_DEFLATE_LEVEL            1  /* best time/size ratio */  
+#define NCDF_COMPRESS_SZIP            3  /* no support for writting */ 
+
+
+/* helper inline function for libnetcdf errors */
+/* how can we make this a multi-line define ? */
+//#define NCDF_ERR(status)  ( if ( status != NC_NOERR ) 
+//{ CPLError( CE_Failure, CPLE_AppDefined, "netcdf error #%d : %s .\n", status, nc_strerror(status) ); } ) 
+void NCDF_ERR(int status)  { if ( status != NC_NOERR ) { 
+        CPLError( CE_Failure, CPLE_AppDefined, 
+                  "netcdf error #%d : %s .\n", 
+                  status, nc_strerror(status) ); } } 
+
+/* -------------------------------------------------------------------- */
+/*      CF-1 convention standard variables related                      */
+/*      to mapping & projection - see http://cf-pcmdi.llnl.gov/         */
+/* -------------------------------------------------------------------- */
+
+/* projection types */
 #define AEA                    "albers_conical_equal_area"
 #define AE                     "azimuthal_equidistant"
 #define CEA                    "cylindrical_equal_area"
@@ -66,6 +126,7 @@
 #define POLAR_STEREO           "polar_stereographic"
 #define STEREO                 "stereographic"
 
+/* projection parameters */
 #define STD_PARALLEL           "standard_parallel"
 #define STD_PARALLEL_1         "standard_parallel_1"
 #define STD_PARALLEL_2         "standard_parallel_2"
@@ -73,7 +134,6 @@
 #define LONG_CENTRAL_MERIDIAN  "longitude_of_central_meridian"
 #define LON_PROJ_ORIGIN        "longitude_of_projection_origin"
 #define LAT_PROJ_ORIGIN        "latitude_of_projection_origin"
-#define SCALE_FACTOR_ORIGIN    "scale_factor_at_projection_origin"
 #define PROJ_X_ORIGIN          "projection_x_coordinate_origin"
 #define PROJ_Y_ORIGIN          "projection_y_coordinate_origin"
 #define EARTH_SHAPE            "GRIB_earth_shape"
@@ -82,6 +142,7 @@
 // SCALE_FACTOR_MERIDIAN and  SCALE_FACTOR_ORIGIN
 #define SCALE_FACTOR           "scale_factor" 
 #define SCALE_FACTOR_MERIDIAN  "scale_factor_at_central_meridian"
+#define SCALE_FACTOR_ORIGIN    "scale_factor_at_projection_origin"
 #define VERT_LONG_FROM_POLE    "straight_vertical_longitude_from_pole"
 #define FALSE_EASTING          "false_easting"
 #define FALSE_NORTHING         "false_northing"
@@ -92,96 +153,22 @@
 #define SEMI_MAJOR_AXIS        "semi_major_axis"
 #define SEMI_MINOR_AXIS        "semi_minor_axis"
 
-/* renamed defs */
-#define NCDF_STD_NAME        "standard_name"
-#define NCDF_LNG_NAME        "long_name"
-#define NCDF_UNITS           "units"
-#define NCDF_AXIS            "axis"
-#define NCDF_BOUNDS          "bounds"
-#define NCDF_ORIG_AXIS       "original_units"
-
-#define NCDF_NBDIM           2
-
-/* new defs */
-#define NCDF_DIMNAME_X       "x"
-#define NCDF_DIMNAME_Y       "y"
-#define NCDF_DIMNAME_LON     "lon"
-#define NCDF_DIMNAME_LAT     "lat"
-#define NCDF_CONVENTIONS_CF  "CF-1.5"
-#define NCDF_GDAL            GDALVersionInfo("--version")
-#define NCDF_SPATIAL_REF     "spatial_ref"
-#define NCDF_GEOTRANSFORM    "GeoTransform"
-#define NCDF_ADD_OFFSET      "add_offset"
-#define NCDF_SCALE_FACTOR    "scale_factor"
-#define NCDF_UNITS_M         "metre"// should be SRS_UL_METER but use meter now for compat with gtiff files
-#define NCDF_UNITS_D         SRS_UA_DEGREE
-
-/* netcdf file types, as in libcdi/cdo and compat w/netcdf.h */
-#define NCDF_FILETYPE_NONE            0   /* Not a netCDF file */
-#define NCDF_FILETYPE_NC              1   /* File type netCDF */
-#define NCDF_FILETYPE_NC2             2   /* File type netCDF version 2 (64-bit)  */
-#define NCDF_FILETYPE_NC4             3   /* File type netCDF version 4           */
-#define NCDF_FILETYPE_NC4C            4   /* File type netCDF version 4 (classic) - not used yet */
-/* File type HDF5, not supported here (lack of netCDF-4 support or extension is not .nc or .nc4 */
-#define NCDF_FILETYPE_HDF5            5   
-#define NCDF_FILETYPE_UNKNOWN         10  /* Filetype not determined (yet) */
-
-/* compression */
-#define NCDF_COMPRESS_NONE            0   
-/* TODO */
-/* http://www.unidata.ucar.edu/software/netcdf/docs/BestPractices.html#Packed%20Data%20Values */
-#define NCDF_COMPRESS_PACKED          1  
-#define NCDF_COMPRESS_DEFLATE         2   
-#define NCDF_DEFLATE_LEVEL            1  /* best time/size ratio */  
-#define NCDF_COMPRESS_SZIP            3  /* no support for writting */ 
-
-
-/* ugly, how can we make this a multi-line define ? */
-//#define NCDF_ERR(status)  ( if ( status != NC_NOERR ) 
-//{ CPLError( CE_Failure, CPLE_AppDefined, "netcdf error #%d : %s .\n", status, nc_strerror(status) ); } ) 
-void NCDF_ERR(int status)  { if ( status != NC_NOERR ) { 
-        CPLError( CE_Failure, CPLE_AppDefined, 
-                  "netcdf error #%d : %s .\n", 
-                  status, nc_strerror(status) ); } } 
-
+/* -------------------------------------------------------------------- */
+/*         CF-1 to GDAL mappings                                        */
+/* -------------------------------------------------------------------- */
 
 /* Following are a series of mappings from CF-1 convention parameters
- * for each projection, to the equivalent in OGC WKT used internally by
- * GDAL.
+ * for each projection, to the equivalent in OGC WKT used internally by GDAL.
  * See: http://cf-pcmdi.llnl.gov/documents/cf-conventions/1.5/apf.html
  */
 
-/* A struct allowing us to map from GDAL projection attributes (OGC WKT),
-   and NetCDF ones (CF-1) */
+/* A struct allowing us to map between GDAL(OGC WKT) and CF-1 attributes */
 typedef struct {
     const char *NCDF_ATT;
     const char *GDAL_ATT; 
     // TODO: mappings may need default values, like scale factor?
     //double defval;
 } oNetcdfSRS_PP;
-
-//Grid mapping attributes
-//
-//earth_radius
-//false_easting 	
-//false_northing 	
-//grid_mapping_name 	
-//grid_north_pole_latitude
-//grid_north_pole_longitude
-//inverse_flattening
-//latitude_of_projection_origin 
-//longitude_of_central_meridian 
-//longitude_of_prime_meridian
-//longitude_of_projection_origin
-//north_pole_grid_longitude 
-//perspective_point_height	
-//scale_factor_at_central_meridian 
-//scale_factor_at_projection_origin 
-//semi_major_axis
-//semi_minor_axis
-//standard_parallel 	
-//straight_vertical_longitude_from_pole 	
-
 
 // default mappings, for the generic case
 /* These 'generic' mappings are based on what was previously in the  
@@ -563,6 +550,12 @@ static const oNetcdfSRS_PT poNetcdfSRS_PT[] = {
     {NULL, NULL, NULL },
 };
 
+
+/************************************************************************/
+/* ==================================================================== */
+/*			     netCDFDataset		                             		*/
+/* ==================================================================== */
+/************************************************************************/
 
 class netCDFRasterBand;
 
