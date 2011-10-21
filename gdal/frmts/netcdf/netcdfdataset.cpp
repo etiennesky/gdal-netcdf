@@ -81,6 +81,8 @@ class netCDFRasterBand : public GDALPamRasterBand
     double      dfNoDataValue;
     double      dfScale;
     double      dfOffset;
+    int         bSignedChar;
+    int         bUnsignedByte;
     CPLErr	    CreateBandMetadata( ); 
     
   public:
@@ -204,6 +206,13 @@ CPLErr netCDFRasterBand::CreateBandMetadata( )
     size_t   count[1];
     char     szTemp[NC_MAX_NAME];
     const char *pszValue;
+    int nAtt=0;
+    nc_type  atttype=NC_NAT;
+    size_t   attlen;
+    float fval;
+    double dval;
+    int ival;
+    int bValidMeta;
 
     nc_type nVarType;
     netCDFDataset *poDS;
@@ -339,16 +348,40 @@ CPLErr netCDFRasterBand::CreateBandMetadata( )
     }
 
 /* -------------------------------------------------------------------- */
+/*  Special For Byte Bands: set PIXELTYPE if appropriate                */
+/* -------------------------------------------------------------------- */
+    status=nc_inq_vartype(poDS->cdfid,  
+                          nZId,
+                          &nc_datatype );
+    if (nc_datatype == NC_BYTE) {
+        int bSignedByte = FALSE;
+        if (poDS->nFileType == NC_FORMAT_NETCDF4) {
+            bSignedByte = TRUE;
+        }
+        else {
+            /* For NC classic data models: only consider signed if specifically sets value
+               range appropriately. Since we may get NetCDF files that don't set these,
+               for GDAL we should consider unsigned by default */
+    	    short range[2];
+            status = nc_inq_att( poDS->cdfid, nZId, 
+                         "valid_range", &atttype, &attlen);
+            if( (status == NC_NOERR) && (atttype == NC_SHORT) && (attlen == 2)) {
+                status=nc_get_att_short( poDS->cdfid, nZId,
+                            "valid_range", range );
+                if ((range[0] == -128) && (range[1] == 127)) {
+                    bSignedByte = TRUE;
+                }
+            }
+        }
+        if (bSignedByte) {
+            SetMetadataItem( "PIXELTYPE", "SIGNEDBYTE", "IMAGE_STRUCTURE" );
+        }
+    }
+
+/* -------------------------------------------------------------------- */
 /*      Get all other metadata                                          */
 /* -------------------------------------------------------------------- */
 
-    int nAtt=0;
-    nc_type  atttype=NC_NAT;
-    size_t   attlen;
-    float fval;
-    double dval;
-    int ival;
-    int bValidMeta;
 
     nc_inq_varnatts( poDS->cdfid, nZId, &nAtt );
     for( i=0; i < nAtt ; i++ ) {
@@ -462,10 +495,17 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
         return;
     }
 
-    if( (nc_datatype == NC_BYTE) ) 
+    this->bSignedChar = FALSE;
+    if( (nc_datatype == NC_BYTE) ) {
         eDataType = GDT_Byte;
-    else if( (nc_datatype == NC_UBYTE) ) 
+        if (poDS->nFileType == NC_FORMAT_NETCDF4) {
+            /* In this case, we'll need to read/write later on as signed char */
+            this->bSignedChar = TRUE;
+        }
+    }    
+    else if( (nc_datatype == NC_UBYTE) ) {
         eDataType = GDT_Byte;
+    }    
     else if( (nc_datatype == NC_CHAR) ) 
         eDataType = GDT_Byte;        
     else if( nc_datatype == NC_SHORT )
@@ -680,8 +720,14 @@ CPLErr netCDFRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
     }
 
     if( eDataType == GDT_Byte )
-        nErr = nc_get_vara_uchar( cdfid, nZId, start, edge, 
-                                  (unsigned char *) pImage );
+        if (this->bSignedChar) {
+            nErr = nc_get_vara_schar( cdfid, nZId, start, edge, 
+                                      (signed char *) pImage );
+        }
+        else {
+            nErr = nc_get_vara_uchar( cdfid, nZId, start, edge, 
+                                    (unsigned char *) pImage );
+        }
     else if( eDataType == GDT_Int16 )
         nErr = nc_get_vara_short( cdfid, nZId, start, edge, 
                                   (short int *) pImage );
@@ -3782,18 +3828,29 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 /*      Byte                                                            */
 /* -------------------------------------------------------------------- */
         if( eDT == GDT_Byte ) {
+            const char *pszPixelType = NULL;
  
 /* -------------------------------------------------------------------- */
 /*      Define variable and attributes                                  */
 /* -------------------------------------------------------------------- */
             
-            /* Byte can be of different type according to file version */
-            /* PDS: don't use NC_UBYTE if NC4 Classic, since
-               need to stick to classic NC3 datatypes in that case */
-            if ( nFileType == NCDF_FILETYPE_NC4 )
-                nDataType = NC_UBYTE;
-            else 
+            pszPixelType = poSrcBand->GetMetadataItem("PIXELTYPE","IMAGE_STRUCTURE");
+            /* GDAL defaults to unsigned bytes, but check if metadata says its
+               signed, as NetCDF can support this for certain formats.
+               See http://trac.osgeo.org/gdal/wiki/rfc14_imagestructure */
+            if (pszPixelType && EQUAL(pszPixelType,"SIGNEDBYTE")) {
                 nDataType = NC_BYTE;
+            }
+            else {
+                if ( nFileType == NCDF_FILETYPE_NC4 ) {
+                    nDataType = NC_UBYTE;
+                }    
+                else {    
+                    /* No unsigned byte datatype in pre NC4, and NC4-Classic */
+                    /* Rely on valid range and _unsigned convention below */
+                    nDataType = NC_BYTE;
+                }    
+            }
 
            CPLDebug( "GDAL_netCDF", "%s = GDT_Byte filetype = %d nc_type = %d",
                      szBandName, nFileType, nDataType);
@@ -3818,17 +3875,26 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
             nc_put_att_schar( fpImage, NCDFVarID, _FillValue,
                               nDataType, 1, &cNoDataValue );            
 
-            /* For NC_BYTE, add valid_range and _Unsigned = "true" to specify unsigned byte
+            /* Add unsigned attribute specs, unless the band metadata specifically lists it
+               as signed. See:
                http://www.unidata.ucar.edu/software/netcdf/docs/BestPractices.html#Unsigned
                http://cf-pcmdi.llnl.gov/documents/cf-conventions/1.5/cf-conventions.html#id2859230
                http://www.unidata.ucar.edu/software/netcdf/docs/netcdf.html#Attribute-Conventions
             */
-            if ( nDataType == NC_BYTE ) {
-                short int nValidRange[] = {0,255};
+            if ( nFileType != NCDF_FILETYPE_NC4 ) {
+                short int nValidRange[2];
+                if (pszPixelType && EQUAL(pszPixelType,"SIGNEDBYTE")) {
+                    nValidRange[0] = -128;
+                    nValidRange[1] = 127;
+                }
+                else {
+                    nValidRange[0] = 0;
+                    nValidRange[1] = 255;
+                    status = nc_put_att_text( fpImage, NCDFVarID, 
+                                              "_Unsigned", 4, "true" );
+                }
                 status=nc_put_att_short( fpImage, NCDFVarID, "valid_range",
                                          NC_SHORT, 2, nValidRange );
-                status = nc_put_att_text( fpImage, NCDFVarID, 
-                                          "_Unsigned", 4, "true" );
             }
 
 /* -------------------------------------------------------------------- */
@@ -3853,8 +3919,21 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                 count[0]=1;
                 count[1]=nXSize;
                 
-                status = nc_put_vara_uchar (fpImage, NCDFVarID, start,
-                                            count, pabScanline);
+                if ( nFileType != NCDF_FILETYPE_NC4 ) {
+                    status = nc_put_vara_uchar (fpImage, NCDFVarID, start,
+                                                count, pabScanline);
+                }
+                else {
+                    if (pszPixelType && EQUAL(pszPixelType,"SIGNEDBYTE")) {
+                        status = nc_put_vara_schar (fpImage, NCDFVarID, start,
+                                                    count, (const signed char*)pabScanline);
+                    }
+                    else {
+                        status = nc_put_vara_uchar (fpImage, NCDFVarID, start,
+                                                    count, pabScanline);
+                    }
+                }
+
                 if (status != NC_NOERR) 
                     fprintf(stdout, "%s\n", nc_strerror(status));
             }
