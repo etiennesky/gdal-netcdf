@@ -134,8 +134,6 @@ void NCDF_ERR(int status)  { if ( status != NC_NOERR ) {
 #define LONG_CENTRAL_MERIDIAN  "longitude_of_central_meridian"
 #define LON_PROJ_ORIGIN        "longitude_of_projection_origin"
 #define LAT_PROJ_ORIGIN        "latitude_of_projection_origin"
-#define PROJ_X_ORIGIN          "projection_x_coordinate_origin"
-#define PROJ_Y_ORIGIN          "projection_y_coordinate_origin"
 #define EARTH_SHAPE            "GRIB_earth_shape"
 #define EARTH_SHAPE_CODE       "GRIB_earth_shape_code"
 // this is not CF, there are two possible translations 
@@ -152,6 +150,9 @@ void NCDF_ERR(int status)  { if ( status != NC_NOERR ) {
 #define LONG_PRIME_MERIDIAN    "longitude_of_prime_meridian"
 #define SEMI_MAJOR_AXIS        "semi_major_axis"
 #define SEMI_MINOR_AXIS        "semi_minor_axis"
+/* Coordinate variables of projections */
+#define PROJ_X_COORD           "projection_x_coordinate"
+#define PROJ_Y_COORD           "projection_y_coordinate"
 
 /* -------------------------------------------------------------------- */
 /*         CF-1 to GDAL mappings                                        */

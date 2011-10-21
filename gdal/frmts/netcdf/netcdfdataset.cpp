@@ -3477,8 +3477,8 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         status = nc_def_var( fpImage, NCDF_DIMNAME_X, NC_DOUBLE, 
                              1, anXDims, &NCDFVarID );
         nc_put_att_text( fpImage, NCDFVarID, NCDF_STD_NAME,
-                         strlen(PROJ_X_ORIGIN),
-                         PROJ_X_ORIGIN );
+                         strlen(PROJ_X_COORD),
+                         PROJ_X_COORD );
         nc_put_att_text( fpImage, NCDFVarID, NCDF_LNG_NAME,
                          strlen("x coordinate of projection"),
                          "x coordinate of projection" );
@@ -3507,8 +3507,8 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         status = nc_def_var( fpImage, NCDF_DIMNAME_Y, NC_DOUBLE, 
                              1, anYDims, &NCDFVarID );
         nc_put_att_text( fpImage, NCDFVarID, NCDF_STD_NAME,
-                         strlen(PROJ_Y_ORIGIN),
-                         PROJ_Y_ORIGIN );
+                         strlen(PROJ_Y_COORD),
+                         PROJ_Y_COORD );
         nc_put_att_text( fpImage, NCDFVarID, NCDF_LNG_NAME,
                          strlen("y coordinate of projection"),
                          "y coordinate of projection" );
