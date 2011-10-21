@@ -1516,7 +1516,8 @@ void netCDFDataset::SetProjection( int var )
 		  
             else if ( EQUAL ( pszValue, POLAR_STEREO ) ) {
                 /* Note: reversing our current mapping on export, from
-                   'latitude_of_origin' in OGC WKT to 'standard_parallel' in CF-1 */
+                   'latitude_of_origin' in OGC WKT to 'standard_parallel' in CF-1
+                   TODO: this could do with further verification */
                 char **papszStdParallels = NULL;
 
                 papszStdParallels = 
@@ -1526,7 +1527,7 @@ void netCDFDataset::SetProjection( int var )
                     dfCenterLat = CPLAtofM( papszStdParallels[0] );
                 }
                 else {
-                    //TODO: not totally sure how to handle if CF-1 doesn't include a std_parallel:
+                    //TODO: not sure how to handle if CF-1 doesn't include a std_parallel:
                     dfCenterLat = 0.0; //just to avoid warning at compilation
                     CPLError( CE_Failure, CPLE_NotSupported, 
                               "The NetCDF driver does not yet to support import of CF-1 Polar stereographic "
