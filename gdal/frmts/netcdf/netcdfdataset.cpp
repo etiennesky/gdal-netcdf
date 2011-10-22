@@ -3834,6 +3834,19 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
         GDALRasterBand *poSrcBand = poSrcDS->GetRasterBand( i );
         hBand = GDALGetRasterBand( poSrcDS, i );
 
+        //int iLine = 0;
+        /* note, this takes up a small amount of memory, but makes code shorter and faster */
+        int *panLine = (int *) CPLMalloc( nYSize * sizeof(int) );
+        if ( ! bBottomUp ) {
+            for( int iLine = 0; iLine < nYSize; iLine++ ) panLine[iLine] = iLine; 
+        }
+        else {
+            int iLineR = nYSize-1;
+            for( int iLine = 0; iLine < nYSize; iLine++ )
+                panLine[iLine] = iLineR--;
+        }
+        // for( int iLine = 0; iLine < nYSize; iLine++ ) printf("%d ",panLine[iLine]); 
+
         /* Get var name from NETCDF_VARNAME */
         tmpMetadata = poSrcBand->GetMetadataItem("NETCDF_VARNAME");
        	if( tmpMetadata != NULL) {
@@ -3917,34 +3930,58 @@ NCDFCreateCopy2( const char * pszFilename, GDALDataset *poSrcDS,
 /*      Write data line per line                                        */
 /* -------------------------------------------------------------------- */
 
-            pabScanline = (GByte *) CPLMalloc( 1 * nXSize * sizeof(GByte) );
-            
-            for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
+            // pabScanline = (GByte *) CPLMalloc( 1 * nXSize * sizeof(GByte) );
+            pabScanline = (GByte *) CPLMalloc( 1 * nXSize* nYSize * sizeof(GByte) );
 
+            // int nLines = 1;
+            // int nTmpYSize = nYSize;
+
+            
+            // for( int iLine = 0; iLine < nLines && eErr == CE_None; iLine++ )  {
+            for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
 /* -------------------------------------------------------------------- */
 /*      Read data from band i                                           */
 /* -------------------------------------------------------------------- */
+                // eErr = poSrcBand->RasterIO( GF_Read, 0, iLine, nXSize, 1, 
+                //                             pabScanline, nXSize, 1, GDT_Byte,
+                //                             0,0);
                 eErr = poSrcBand->RasterIO( GF_Read, 0, iLine, nXSize, 1, 
-                                            pabScanline, nXSize, 1, GDT_Byte,
+                                            pabScanline+ ( panLine[iLine] * nXSize * sizeof(GByte ) ), 
+                                            nXSize, 1, GDT_Byte,
                                             0,0);
+                // printf("TMP ET RasterIO(-,0,%d,%d,%d,-,%d,%d,%d,0,0)\n",
+                //        iLine, nXSize, nTmpYSize, 
+                //        nXSize, nTmpYSize, GDT_Byte);
+                // eErr = poSrcBand->RasterIO( GF_Read, 0, iLine, nXSize, nTmpYSize, 
+                //                             pabScanline, nXSize, nTmpYSize, GDT_Byte,
+                //                             0,0);
 			   
 /* -------------------------------------------------------------------- */
 /*      Write Data from Band i                                          */
 /* -------------------------------------------------------------------- */
-                if ( ! bBottomUp )
-                    start[0]=iLine;
-                else /* invert latitude values */
-                    start[0]=nYSize - iLine - 1;
-                start[1]=0;
-                count[0]=1;
-                count[1]=nXSize;
-                
-                status = nc_put_vara_uchar (fpImage, NCDFVarID, start,
-                                            count, pabScanline);
-                if (status != NC_NOERR) 
-                    fprintf(stdout, "%s\n", nc_strerror(status));
+                // if ( ! bBottomUp )
+                //     start[0]=iLine;
+                // else /* invert latitude values */
+                //     start[0]=nYSize - iLine - 1;
+                // start[1]=0;
+                // count[0]=1;
+                // count[1]=nXSize;
 
             }
+            start[0]=0;
+            start[1]=0;
+            count[0]=nYSize;
+            count[1]=nXSize;
+                
+            printf("TMP ET nc_put_vara_uchar (fpImage, %d, %d-%d,%d-%d,-)\n",
+                   NCDFVarID, start[0],start[1],count[0],count[1]);
+            status = nc_put_vara_uchar (fpImage, NCDFVarID, start,
+                                        count, pabScanline);
+            if (status != NC_NOERR) 
+                fprintf(stdout, "%s\n", nc_strerror(status));
+
+            //        }
+
 /* -------------------------------------------------------------------- */
 /*      Put NetCDF file back in define mode.                            */
 /* -------------------------------------------------------------------- */
