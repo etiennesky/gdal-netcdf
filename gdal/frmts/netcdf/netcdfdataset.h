@@ -1,5 +1,5 @@
 /******************************************************************************
- * $Id: netcdfdataset.h 23197 2011-10-07 00:34:31Z pds $
+ * $Id$
  *
  * Project:  netCDF read/write Driver
  * Purpose:  GDAL bindings over netCDF library.
@@ -41,136 +41,154 @@
 
 /************************************************************************/
 /* ==================================================================== */
-/*			     netCDFDataset				*/
+/*			     defines    		                             		*/
 /* ==================================================================== */
 /************************************************************************/
 
-#define MAX_STR_LEN            8192
+/* -------------------------------------------------------------------- */
+/*      Driver-specific defines                                         */
+/* -------------------------------------------------------------------- */
 
-/* Useful defines of CF-1 convention standard variables related to mapping
- * & projection - see http://cf-pcmdi.llnl.gov/ */
-#define AEA                    "albers_conical_equal_area"
-#define AE                     "azimuthal_equidistant"
-#define CEA                    "cylindrical_equal_area"
-#define LAEA                   "lambert_azimuthal_equal_area"
-#define LCEA                   "lambert_cylindrical_equal_area"
-#define LCC                    "lambert_conformal_conic"
-#define TM                     "transverse_mercator"
-#define GRD_MAPPING_NAME       "grid_mapping_name"
-#define GRD_MAPPING            "grid_mapping"
-#define COORDINATES            "coordinates"
-#define LONLAT                 "lon lat"
-#define LATITUDE_LONGITUDE     "latitude_longitude"
-#define MERCATOR               "mercator"
-#define ORTHOGRAPHIC           "orthographic"
-#define POLAR_STEREO           "polar_stereographic"
-#define STEREO                 "stereographic"
+/* NETCDF driver defs */
+#define NCDF_MAX_STR_LEN     8192
+#define NCDF_CONVENTIONS_CF  "CF-1.5"
+#define NCDF_GDAL             GDALVersionInfo("--version")
+#define NCDF_NBDIM           2
+#define NCDF_SPATIAL_REF     "spatial_ref"
+#define NCDF_GEOTRANSFORM    "GeoTransform"
+#define NCDF_DIMNAME_X       "x"
+#define NCDF_DIMNAME_Y       "y"
+#define NCDF_DIMNAME_LON     "lon"
+#define NCDF_DIMNAME_LAT     "lat"
+#define NCDF_LONLAT          "lon lat"
 
-#define STD_PARALLEL           "standard_parallel"
-#define STD_PARALLEL_1         "standard_parallel_1"
-#define STD_PARALLEL_2         "standard_parallel_2"
-#define CENTRAL_MERIDIAN       "central_meridian"
-#define LONG_CENTRAL_MERIDIAN  "longitude_of_central_meridian"
-#define LON_PROJ_ORIGIN        "longitude_of_projection_origin"
-#define LAT_PROJ_ORIGIN        "latitude_of_projection_origin"
-#define SCALE_FACTOR_ORIGIN    "scale_factor_at_projection_origin"
-#define PROJ_X_ORIGIN          "projection_x_coordinate_origin"
-#define PROJ_Y_ORIGIN          "projection_y_coordinate_origin"
-#define EARTH_SHAPE            "GRIB_earth_shape"
-#define EARTH_SHAPE_CODE       "GRIB_earth_shape_code"
-//this is not CF but there are two possible translations SCALE_FACTOR_MERIDIAN and  SCALE_FACTOR_ORIGIN
-#define SCALE_FACTOR           "scale_factor" 
-#define SCALE_FACTOR_MERIDIAN  "scale_factor_at_central_meridian"
-#define VERT_LONG_FROM_POLE    "straight_vertical_longitude_from_pole"
-#define FALSE_EASTING          "false_easting"
-#define FALSE_NORTHING         "false_northing"
-#define EARTH_RADIUS           "earth_radius"
-#define EARTH_RADIUS_OLD       "spherical_earth_radius_meters"
-#define INVERSE_FLATTENING     "inverse_flattening"
-#define LONG_PRIME_MERIDIAN    "longitude_of_prime_meridian"
-#define SEMI_MAJOR_AXIS        "semi_major_axis"
-#define SEMI_MINOR_AXIS        "semi_minor_axis"
+/* netcdf file types, as in libcdi/cdo and compat w/netcdf.h */
+#define NCDF_FORMAT_NONE            0   /* Not a netCDF file */
+#define NCDF_FORMAT_NC              1   /* netCDF classic format */
+#define NCDF_FORMAT_NC2             2   /* netCDF version 2 (64-bit)  */
+#define NCDF_FORMAT_NC4             3   /* netCDF version 4 */
+#define NCDF_FORMAT_NC4C            4   /* netCDF version 4 (classic) */
+#define NCDF_FORMAT_UNKNOWN         10  /* Format not determined (yet) */
+/* HDF files (HDF5 or HDF4) not supported because of lack of support */
+/* in libnetcdf installation or conflict with other drivers */
+#define NCDF_FORMAT_HDF5            5   /* HDF4 file, not supported */
+#define NCDF_FORMAT_HDF4            6   /* HDF4 file, not supported */
 
-#define STD_NAME               "standard_name"
-#define LNG_NAME               "long_name"
-#define UNITS                  "units"
-#define AXIS                   "axis"
-#define BOUNDS                 "bounds"
-#define ORIG_AXIS              "original_units"
-
-#define GDALNBDIM  2
-
-/* netcdf file types, as in libcdi/cdo */
-#define NCDF_FILETYPE_NONE            0   /* Not a netCDF file */
-#define NCDF_FILETYPE_NC              1   /* File type netCDF                     */
-#define NCDF_FILETYPE_NC2             2   /* File type netCDF version 2 (64-bit)  */
-#define NCDF_FILETYPE_NC4             3   /* File type netCDF version 4           */
-#define NCDF_FILETYPE_NC4C            4   /* File type netCDF version 4 (classic) - not used yet */
-/* File type HDF5, not supported here (lack of netCDF-4 support or extension is not .nc or .nc4 */
-#define NCDF_FILETYPE_HDF5            5   
-#define NCDF_FILETYPE_UNKNOWN         10  /* Filetype not determined (yet) */
-
-/* compression */
+/* compression parameters */
 #define NCDF_COMPRESS_NONE            0   
+/* TODO */
 /* http://www.unidata.ucar.edu/software/netcdf/docs/BestPractices.html#Packed%20Data%20Values */
-#define NCDF_COMPRESS_PACKED          1  /* TODO */
+#define NCDF_COMPRESS_PACKED          1  
 #define NCDF_COMPRESS_DEFLATE         2   
 #define NCDF_DEFLATE_LEVEL            1  /* best time/size ratio */  
 #define NCDF_COMPRESS_SZIP            3  /* no support for writting */ 
 
-/* new defs */
-#define NCDF_DIMNAME_X                "x"
-#define NCDF_DIMNAME_Y                "y"
-#define NCDF_DIMNAME_LON              "lon"
-#define NCDF_DIMNAME_LAT              "lat"
-#define NCDF_CONVENTIONS_CF           "CF-1.5"
-#define NCDF_GDAL                     GDALVersionInfo("--version")
-#define NCDF_SPATIAL_REF              "spatial_ref"
-#define NCDF_ADD_OFFSET               "add_offset"
-#define NCDF_SCALE_FACTOR             "scale_factor"
-#define NCDF_UNITS_M                  "metre"// should be SRS_UL_METER but use meter now for compat with gtiff files
-#define NCDF_UNITS_D                  SRS_UA_DEGREE
+/* helper inline function for libnetcdf errors */
+/* how can we make this a multi-line define ? */
+//#define NCDF_ERR(status)  ( if ( status != NC_NOERR ) 
+//{ CPLError( CE_Failure, CPLE_AppDefined, "netcdf error #%d : %s .\n", status, nc_strerror(status) ); } ) 
+void NCDFErr(int status)  { if ( status != NC_NOERR ) { 
+        CPLError( CE_Failure, CPLE_AppDefined, 
+                  "netcdf error #%d : %s .\n", 
+                  status, nc_strerror(status) ); } } 
 
-#define NCDF_
+/* NC2 check may not have passed if using netcdf-3, no nc-config */
+#ifndef NETCDF_HAS_NC2
+#ifdef NC_64BIT_OFFSET
+#define NETCDF_HAS_NC2 1
+#endif
+#endif
 
+
+/* -------------------------------------------------------------------- */
+/*       CF or NUG (NetCDF User's Guide) defs                           */
+/* -------------------------------------------------------------------- */
+
+/* CF: http://cf-pcmdi.llnl.gov/documents/cf-conventions/1.5/cf-conventions.html */
+/* NUG: http://www.unidata.ucar.edu/software/netcdf/docs/netcdf.html#Variables */
+#define CF_STD_NAME          "standard_name"
+#define CF_LNG_NAME          "long_name"
+#define CF_UNITS             "units"
+#define CF_ADD_OFFSET        "add_offset"
+#define CF_SCALE_FACTOR      "scale_factor"
+/* should be SRS_UL_METER but use meter now for compat with gtiff files */
+#define CF_UNITS_M           "metre"
+#define CF_UNITS_D           SRS_UA_DEGREE
+#define CF_PROJ_X_COORD      "projection_x_coordinate"
+#define CF_PROJ_Y_COORD      "projection_y_coordinate"
+#define CF_GRD_MAPPING_NAME  "grid_mapping_name"
+#define CF_GRD_MAPPING       "grid_mapping"
+#define CF_COORDINATES       "coordinates"
+/* #define CF_AXIS            "axis" */
+/* #define CF_BOUNDS          "bounds" */
+/* #define CF_ORIG_UNITS      "original_units" */
+
+/* -------------------------------------------------------------------- */
+/*      CF-1 convention standard variables related to                   */
+/*      mapping & projection - see http://cf-pcmdi.llnl.gov/            */
+/* -------------------------------------------------------------------- */
+
+/* projection types */
+#define CF_PT_AEA                    "albers_conical_equal_area"
+#define CF_PT_AE                     "azimuthal_equidistant"
+#define CF_PT_CEA                    "cylindrical_equal_area"
+#define CF_PT_LAEA                   "lambert_azimuthal_equal_area"
+#define CF_PT_LCEA                   "lambert_cylindrical_equal_area"
+#define CF_PT_LCC                    "lambert_conformal_conic"
+#define CF_PT_TM                     "transverse_mercator"
+#define CF_PT_LATITUDE_LONGITUDE     "latitude_longitude"
+#define CF_PT_MERCATOR               "mercator"
+#define CF_PT_ORTHOGRAPHIC           "orthographic"
+#define CF_PT_POLAR_STEREO           "polar_stereographic"
+#define CF_PT_STEREO                 "stereographic"
+
+/* projection parameters */
+#define CF_PP_STD_PARALLEL           "standard_parallel"
+/* CF uses only "standard_parallel" */
+#define CF_PP_STD_PARALLEL_1         "standard_parallel_1"
+#define CF_PP_STD_PARALLEL_2         "standard_parallel_2"
+#define CF_PP_CENTRAL_MERIDIAN       "central_meridian"
+#define CF_PP_LONG_CENTRAL_MERIDIAN  "longitude_of_central_meridian"
+#define CF_PP_LON_PROJ_ORIGIN        "longitude_of_projection_origin"
+#define CF_PP_LAT_PROJ_ORIGIN        "latitude_of_projection_origin"
+/* #define PROJ_X_ORIGIN             "projection_x_coordinate_origin" */
+/* #define PROJ_Y_ORIGIN             "projection_y_coordinate_origin" */
+#define CF_PP_EARTH_SHAPE            "GRIB_earth_shape"
+#define CF_PP_EARTH_SHAPE_CODE       "GRIB_earth_shape_code"
+/* scale_factor is not CF, there are two possible translations  */
+/* for WKT scale_factor : SCALE_FACTOR_MERIDIAN and SCALE_FACTOR_ORIGIN */
+/* TODO add both in generic mapping, remove CF_PP_SCALE_FACTOR */
+#define SCALE_FACTOR           "scale_factor" /* TODO: this has to go */
+#define CF_PP_SCALE_FACTOR_MERIDIAN  "scale_factor_at_central_meridian"
+#define CF_PP_SCALE_FACTOR_ORIGIN    "scale_factor_at_projection_origin"
+#define CF_PP_VERT_LONG_FROM_POLE    "straight_vertical_longitude_from_pole"
+#define CF_PP_FALSE_EASTING          "false_easting"
+#define CF_PP_FALSE_NORTHING         "false_northing"
+#define CF_PP_EARTH_RADIUS           "earth_radius"
+#define CF_PP_EARTH_RADIUS_OLD       "spherical_earth_radius_meters"
+#define CF_PP_INVERSE_FLATTENING     "inverse_flattening"
+#define CF_PP_LONG_PRIME_MERIDIAN    "longitude_of_prime_meridian"
+#define CF_PP_SEMI_MAJOR_AXIS        "semi_major_axis"
+#define CF_PP_SEMI_MINOR_AXIS        "semi_minor_axis"
+#define CF_PP_VERT_PERSP             "vertical_perspective" /*not used yet */
+
+
+/* -------------------------------------------------------------------- */
+/*         CF-1 to GDAL mappings                                        */
+/* -------------------------------------------------------------------- */
 
 /* Following are a series of mappings from CF-1 convention parameters
- * for each projection, to the equivalent in OGC WKT used internally by
- * GDAL.
+ * for each projection, to the equivalent in OGC WKT used internally by GDAL.
  * See: http://cf-pcmdi.llnl.gov/documents/cf-conventions/1.5/apf.html
  */
 
-/* A struct allowing us to map from GDAL projection attributes (OGC WKT),
-   and NetCDF ones (CF-1) */
+/* A struct allowing us to map between GDAL(OGC WKT) and CF-1 attributes */
 typedef struct {
-    const char *NCDF_ATT;
-    const char *GDAL_ATT; 
+    const char *CF_ATT;
+    const char *WKT_ATT; 
     // TODO: mappings may need default values, like scale factor?
     //double defval;
 } oNetcdfSRS_PP;
-
-//Grid mapping attributes
-//
-//earth_radius
-//false_easting 	
-//false_northing 	
-//grid_mapping_name 	
-//grid_north_pole_latitude
-//grid_north_pole_longitude
-//inverse_flattening
-//latitude_of_projection_origin 
-//longitude_of_central_meridian 
-//longitude_of_prime_meridian
-//longitude_of_projection_origin
-//north_pole_grid_longitude 
-//perspective_point_height	
-//scale_factor_at_central_meridian 
-//scale_factor_at_projection_origin 
-//semi_major_axis
-//semi_minor_axis
-//standard_parallel 	
-//straight_vertical_longitude_from_pole 	
-
 
 // default mappings, for the generic case
 /* These 'generic' mappings are based on what was previously in the  
@@ -183,17 +201,20 @@ typedef struct {
 */ 
 
 static const oNetcdfSRS_PP poGenericMappings[] = {
-    {SCALE_FACTOR, SRS_PP_SCALE_FACTOR },    
-    {STD_PARALLEL_1, SRS_PP_STANDARD_PARALLEL_1 }, 
-    {STD_PARALLEL_2, SRS_PP_STANDARD_PARALLEL_2 }, 
-    {LONG_CENTRAL_MERIDIAN, SRS_PP_CENTRAL_MERIDIAN }, 
-    {LONG_CENTRAL_MERIDIAN, SRS_PP_LONGITUDE_OF_CENTER }, 
-    {LON_PROJ_ORIGIN, SRS_PP_LONGITUDE_OF_ORIGIN },  
+    /* SRS_PP_SCALE_FACTOR is handled as a special case, write 2 values */
+    /* {CF_PP_SCALE_FACTOR, SRS_PP_SCALE_FACTOR },     */
+    /* {CF_PP_SCALE_FACTOR_MERIDIAN, SRS_PP_SCALE_FACTOR },     */
+    /* {CF_PP_SCALE_FACTOR_ORIGIN, SRS_PP_SCALE_FACTOR },     */
+    {CF_PP_STD_PARALLEL_1, SRS_PP_STANDARD_PARALLEL_1 }, 
+    {CF_PP_STD_PARALLEL_2, SRS_PP_STANDARD_PARALLEL_2 }, 
+    {CF_PP_LONG_CENTRAL_MERIDIAN, SRS_PP_CENTRAL_MERIDIAN }, 
+    {CF_PP_LONG_CENTRAL_MERIDIAN, SRS_PP_LONGITUDE_OF_CENTER }, 
+    {CF_PP_LON_PROJ_ORIGIN, SRS_PP_LONGITUDE_OF_ORIGIN },  
     //Multiple mappings to LAT_PROJ_ORIGIN 
-    {LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN },  
-    {LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_CENTER },  
-    {FALSE_EASTING, SRS_PP_FALSE_EASTING },   
-    {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },        
+    {CF_PP_LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN },  
+    {CF_PP_LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_CENTER },  
+    {CF_PP_FALSE_EASTING, SRS_PP_FALSE_EASTING },   
+    {CF_PP_FALSE_NORTHING, SRS_PP_FALSE_NORTHING },        
     {NULL, NULL },
 };
 
@@ -212,12 +233,12 @@ static const oNetcdfSRS_PP poGenericMappings[] = {
 //    * false_northing
 //
 static const oNetcdfSRS_PP poAEAMappings[] = {
-    {STD_PARALLEL_1, SRS_PP_STANDARD_PARALLEL_1},
-    {STD_PARALLEL_2, SRS_PP_STANDARD_PARALLEL_2},
-    {LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_CENTER},
-    {LONG_CENTRAL_MERIDIAN, SRS_PP_LONGITUDE_OF_CENTER},
-    {FALSE_EASTING, SRS_PP_FALSE_EASTING },  
-    {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
+    {CF_PP_STD_PARALLEL_1, SRS_PP_STANDARD_PARALLEL_1},
+    {CF_PP_STD_PARALLEL_2, SRS_PP_STANDARD_PARALLEL_2},
+    {CF_PP_LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_CENTER},
+    {CF_PP_LONG_CENTRAL_MERIDIAN, SRS_PP_LONGITUDE_OF_CENTER},
+    {CF_PP_FALSE_EASTING, SRS_PP_FALSE_EASTING },  
+    {CF_PP_FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
     {NULL, NULL}
  };
 
@@ -234,10 +255,10 @@ static const oNetcdfSRS_PP poAEAMappings[] = {
 //    * false_northing
 //
 static const oNetcdfSRS_PP poAEMappings[] = {
-    {LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_CENTER},
-    {LON_PROJ_ORIGIN, SRS_PP_LONGITUDE_OF_CENTER},
-    {FALSE_EASTING, SRS_PP_FALSE_EASTING },  
-    {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
+    {CF_PP_LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_CENTER},
+    {CF_PP_LON_PROJ_ORIGIN, SRS_PP_LONGITUDE_OF_CENTER},
+    {CF_PP_FALSE_EASTING, SRS_PP_FALSE_EASTING },  
+    {CF_PP_FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
     {NULL, NULL}
  };
 
@@ -254,10 +275,10 @@ static const oNetcdfSRS_PP poAEMappings[] = {
 //    * false_northing
 //
 static const oNetcdfSRS_PP poLAEAMappings[] = {
-    {LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_CENTER},
-    {LON_PROJ_ORIGIN, SRS_PP_LONGITUDE_OF_CENTER},
-    {FALSE_EASTING, SRS_PP_FALSE_EASTING },  
-    {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
+    {CF_PP_LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_CENTER},
+    {CF_PP_LON_PROJ_ORIGIN, SRS_PP_LONGITUDE_OF_CENTER},
+    {CF_PP_FALSE_EASTING, SRS_PP_FALSE_EASTING },  
+    {CF_PP_FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
     {NULL, NULL}
  };
 
@@ -278,22 +299,22 @@ static const oNetcdfSRS_PP poLAEAMappings[] = {
 
 // Lambert conformal conic - 1SP
 static const oNetcdfSRS_PP poLCC1SPMappings[] = {
-    {STD_PARALLEL_1, SRS_PP_STANDARD_PARALLEL_1},
-    {LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN},
-    {LONG_CENTRAL_MERIDIAN, SRS_PP_CENTRAL_MERIDIAN},
-    {FALSE_EASTING, SRS_PP_FALSE_EASTING },  
-    {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
+    {CF_PP_STD_PARALLEL_1, SRS_PP_STANDARD_PARALLEL_1},
+    {CF_PP_LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN},
+    {CF_PP_LONG_CENTRAL_MERIDIAN, SRS_PP_CENTRAL_MERIDIAN},
+    {CF_PP_FALSE_EASTING, SRS_PP_FALSE_EASTING },  
+    {CF_PP_FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
     {NULL, NULL}
  };
 
 // Lambert conformal conic - 2SP
 static const oNetcdfSRS_PP poLCC2SPMappings[] = {
-    {STD_PARALLEL_1, SRS_PP_STANDARD_PARALLEL_1},
-    {STD_PARALLEL_2, SRS_PP_STANDARD_PARALLEL_2},
-    {LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN},
-    {LONG_CENTRAL_MERIDIAN, SRS_PP_CENTRAL_MERIDIAN},
-    {FALSE_EASTING, SRS_PP_FALSE_EASTING },  
-    {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
+    {CF_PP_STD_PARALLEL_1, SRS_PP_STANDARD_PARALLEL_1},
+    {CF_PP_STD_PARALLEL_2, SRS_PP_STANDARD_PARALLEL_2},
+    {CF_PP_LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN},
+    {CF_PP_LONG_CENTRAL_MERIDIAN, SRS_PP_CENTRAL_MERIDIAN},
+    {CF_PP_FALSE_EASTING, SRS_PP_FALSE_EASTING },  
+    {CF_PP_FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
     {NULL, NULL}
  };
 
@@ -315,10 +336,10 @@ static const oNetcdfSRS_PP poLCC2SPMappings[] = {
 //  ignore for now. 
 //
 static const oNetcdfSRS_PP poLCEAMappings[] = {
-    {STD_PARALLEL_1, SRS_PP_STANDARD_PARALLEL_1},
-    {LONG_CENTRAL_MERIDIAN, SRS_PP_CENTRAL_MERIDIAN},
-    {FALSE_EASTING, SRS_PP_FALSE_EASTING },  
-    {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
+    {CF_PP_STD_PARALLEL_1, SRS_PP_STANDARD_PARALLEL_1},
+    {CF_PP_LONG_CENTRAL_MERIDIAN, SRS_PP_CENTRAL_MERIDIAN},
+    {CF_PP_FALSE_EASTING, SRS_PP_FALSE_EASTING },  
+    {CF_PP_FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
     {NULL, NULL}
  };
 
@@ -347,23 +368,23 @@ static const oNetcdfSRS_PP poLCEAMappings[] = {
 
 // Mercator 1 Standard Parallel (EPSG:9804) 
 static const oNetcdfSRS_PP poM1SPMappings[] = {
-    {LON_PROJ_ORIGIN, SRS_PP_CENTRAL_MERIDIAN},
+    {CF_PP_LON_PROJ_ORIGIN, SRS_PP_CENTRAL_MERIDIAN},
     //LAT_PROJ_ORIGIN is always equator (0) in CF-1 
-    {SCALE_FACTOR_ORIGIN, SRS_PP_SCALE_FACTOR},
-    {FALSE_EASTING, SRS_PP_FALSE_EASTING },  
-    {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
+    {CF_PP_SCALE_FACTOR_ORIGIN, SRS_PP_SCALE_FACTOR},
+    {CF_PP_FALSE_EASTING, SRS_PP_FALSE_EASTING },  
+    {CF_PP_FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
     {NULL, NULL}
  };
 
 // Mercator 2 Standard Parallel
 static const oNetcdfSRS_PP poM2SPMappings[] = {
-    {LON_PROJ_ORIGIN, SRS_PP_CENTRAL_MERIDIAN},
-    {STD_PARALLEL_1, SRS_PP_STANDARD_PARALLEL_1},
+    {CF_PP_LON_PROJ_ORIGIN, SRS_PP_CENTRAL_MERIDIAN},
+    {CF_PP_STD_PARALLEL_1, SRS_PP_STANDARD_PARALLEL_1},
     //From best understanding of this projection, only  
  	// actually specify one SP - it is the same N/S of equator. 
-    //{STD_PARALLEL_2, SRS_PP_LATITUDE_OF_ORIGIN}, 
-    {FALSE_EASTING, SRS_PP_FALSE_EASTING },  
-    {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
+    //{CF_PP_STD_PARALLEL_2, SRS_PP_LATITUDE_OF_ORIGIN}, 
+    {CF_PP_FALSE_EASTING, SRS_PP_FALSE_EASTING },  
+    {CF_PP_FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
     {NULL, NULL}
  };
 
@@ -379,10 +400,10 @@ static const oNetcdfSRS_PP poM2SPMappings[] = {
 //    * false_northing
 //
 static const oNetcdfSRS_PP poOrthoMappings[] = {
-    {LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN},
-    {LON_PROJ_ORIGIN, SRS_PP_CENTRAL_MERIDIAN},
-    {FALSE_EASTING, SRS_PP_FALSE_EASTING },  
-    {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
+    {CF_PP_LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN},
+    {CF_PP_LON_PROJ_ORIGIN, SRS_PP_CENTRAL_MERIDIAN},
+    {CF_PP_FALSE_EASTING, SRS_PP_FALSE_EASTING },  
+    {CF_PP_FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
     {NULL, NULL}
  }; 
 
@@ -400,6 +421,8 @@ static const oNetcdfSRS_PP poOrthoMappings[] = {
 //    * false_northing
 
 /* 
+  (http://www.remotesensing.org/geotiff/proj_list/polar_stereographic.html)
+
    TODO: am not entirely sure how CF-1 latitude_of_projection_origin,
    that must either be +90 or -90, maps to OGC WKT.
    Working assumption:
@@ -409,13 +432,15 @@ static const oNetcdfSRS_PP poOrthoMappings[] = {
   TODO: Similarly not sure how to handle 'standard_parallel' vs 'scale_factor_at_projection_origin'
     CF-1 alternatives.
   Having a clear reference, or sample test data, for CF-1 in this projection would help resolve.
+
+  we don't have an alternative calculation based on scale factor
 */
 static const oNetcdfSRS_PP poPSmappings[] = {
-    {STD_PARALLEL_1, SRS_PP_LATITUDE_OF_ORIGIN},
-    {SCALE_FACTOR_ORIGIN, SRS_PP_SCALE_FACTOR},  
-    {VERT_LONG_FROM_POLE, SRS_PP_CENTRAL_MERIDIAN},
-    {FALSE_EASTING, SRS_PP_FALSE_EASTING },  
-    {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
+    {CF_PP_STD_PARALLEL_1, SRS_PP_LATITUDE_OF_ORIGIN},
+    {CF_PP_SCALE_FACTOR_ORIGIN, SRS_PP_SCALE_FACTOR},  
+    {CF_PP_VERT_LONG_FROM_POLE, SRS_PP_CENTRAL_MERIDIAN},
+    {CF_PP_FALSE_EASTING, SRS_PP_FALSE_EASTING },  
+    {CF_PP_FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
     {NULL, NULL}
 };
 
@@ -452,11 +477,11 @@ static const oNetcdfSRS_PP poPSmappings[] = {
 // NB: see bug#4267 Stereographic vs. Oblique_Stereographic
 //
 static const oNetcdfSRS_PP poStMappings[] = {
-    {LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN},
-    {LON_PROJ_ORIGIN, SRS_PP_CENTRAL_MERIDIAN},
-    {SCALE_FACTOR_ORIGIN, SRS_PP_SCALE_FACTOR},  
-    {FALSE_EASTING, SRS_PP_FALSE_EASTING },  
-    {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
+    {CF_PP_LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN},
+    {CF_PP_LON_PROJ_ORIGIN, SRS_PP_CENTRAL_MERIDIAN},
+    {CF_PP_SCALE_FACTOR_ORIGIN, SRS_PP_SCALE_FACTOR},  
+    {CF_PP_FALSE_EASTING, SRS_PP_FALSE_EASTING },  
+    {CF_PP_FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
     {NULL, NULL}
   };
 
@@ -474,11 +499,11 @@ static const oNetcdfSRS_PP poStMappings[] = {
 //    * false_northing
 //
 static const oNetcdfSRS_PP poTMMappings[] = {
-    {SCALE_FACTOR_MERIDIAN, SRS_PP_SCALE_FACTOR},  
-    {LONG_CENTRAL_MERIDIAN, SRS_PP_CENTRAL_MERIDIAN},
-    {LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN},
-    {FALSE_EASTING, SRS_PP_FALSE_EASTING },  
-    {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
+    {CF_PP_SCALE_FACTOR_MERIDIAN, SRS_PP_SCALE_FACTOR},  
+    {CF_PP_LONG_CENTRAL_MERIDIAN, SRS_PP_CENTRAL_MERIDIAN},
+    {CF_PP_LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN},
+    {CF_PP_FALSE_EASTING, SRS_PP_FALSE_EASTING },  
+    {CF_PP_FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
     {NULL, NULL}
   };
 
@@ -503,16 +528,16 @@ static const oNetcdfSRS_PP poTMMappings[] = {
    A NULL mappings value means that the projection is not included in the CF
    standard and the generic mapping (poGenericMappings) will be used. */
 typedef struct {
-    const char *NCDF_SRS;
-    const char *GDAL_SRS; 
+    const char *CF_SRS;
+    const char *WKT_SRS; 
     const oNetcdfSRS_PP* mappings;
 } oNetcdfSRS_PT;
 
 static const oNetcdfSRS_PT poNetcdfSRS_PT[] = {
-    {AEA, SRS_PT_ALBERS_CONIC_EQUAL_AREA, poAEAMappings },
-    {AE, SRS_PT_AZIMUTHAL_EQUIDISTANT, poAEMappings },
+    {CF_PT_AEA, SRS_PT_ALBERS_CONIC_EQUAL_AREA, poAEAMappings },
+    {CF_PT_AE, SRS_PT_AZIMUTHAL_EQUIDISTANT, poAEMappings },
     {"cassini_soldner", SRS_PT_CASSINI_SOLDNER, NULL },
-    {LCEA, SRS_PT_CYLINDRICAL_EQUAL_AREA, poLCEAMappings },
+    {CF_PT_LCEA, SRS_PT_CYLINDRICAL_EQUAL_AREA, poLCEAMappings },
     {"eckert_iv", SRS_PT_ECKERT_IV, NULL },      
     {"eckert_vi", SRS_PT_ECKERT_VI, NULL },  
     {"equidistant_conic", SRS_PT_EQUIDISTANT_CONIC, NULL },
@@ -525,29 +550,34 @@ static const oNetcdfSRS_PT poNetcdfSRS_PT[] = {
     {"hotine_oblique_mercator_2P", 
      SRS_PT_HOTINE_OBLIQUE_MERCATOR_TWO_POINT_NATURAL_ORIGIN, NULL },
     {"laborde_oblique_mercator", SRS_PT_LABORDE_OBLIQUE_MERCATOR, NULL },
-    {LCC, SRS_PT_LAMBERT_CONFORMAL_CONIC_1SP, poLCC1SPMappings },
-    {LCC, SRS_PT_LAMBERT_CONFORMAL_CONIC_2SP, poLCC2SPMappings },
-    {LAEA, SRS_PT_LAMBERT_AZIMUTHAL_EQUAL_AREA, poLAEAMappings },
-    {MERCATOR, SRS_PT_MERCATOR_1SP, poM1SPMappings },
-    {MERCATOR, SRS_PT_MERCATOR_2SP, poM2SPMappings },
+    {CF_PT_LCC, SRS_PT_LAMBERT_CONFORMAL_CONIC_1SP, poLCC1SPMappings },
+    {CF_PT_LCC, SRS_PT_LAMBERT_CONFORMAL_CONIC_2SP, poLCC2SPMappings },
+    {CF_PT_LAEA, SRS_PT_LAMBERT_AZIMUTHAL_EQUAL_AREA, poLAEAMappings },
+    {CF_PT_MERCATOR, SRS_PT_MERCATOR_1SP, poM1SPMappings },
+    {CF_PT_MERCATOR, SRS_PT_MERCATOR_2SP, poM2SPMappings },
     {"miller_cylindrical", SRS_PT_MILLER_CYLINDRICAL, NULL },
     {"mollweide", SRS_PT_MOLLWEIDE, NULL },
     {"new_zealand_map_grid", SRS_PT_NEW_ZEALAND_MAP_GRID, NULL },
     /* for now map to STEREO, see bug #4267 */
     {"oblique_stereographic", SRS_PT_OBLIQUE_STEREOGRAPHIC, NULL }, 
     /* {STEREO, SRS_PT_OBLIQUE_STEREOGRAPHIC, poStMappings },  */
-    {"orthographic", SRS_PT_ORTHOGRAPHIC, poOrthoMappings },
-    {POLAR_STEREO, SRS_PT_POLAR_STEREOGRAPHIC, poPSmappings },
+    {CF_PT_ORTHOGRAPHIC, SRS_PT_ORTHOGRAPHIC, poOrthoMappings },
+    {CF_PT_POLAR_STEREO, SRS_PT_POLAR_STEREOGRAPHIC, poPSmappings },
     {"polyconic", SRS_PT_POLYCONIC, NULL },
     {"robinson", SRS_PT_ROBINSON, NULL }, 
     {"sinusoidal", SRS_PT_SINUSOIDAL, NULL },  
-    {STEREO, SRS_PT_STEREOGRAPHIC, poStMappings },
+    {CF_PT_STEREO, SRS_PT_STEREOGRAPHIC, poStMappings },
     {"swiss_oblique_cylindrical", SRS_PT_SWISS_OBLIQUE_CYLINDRICAL, NULL },
-    {TM, SRS_PT_TRANSVERSE_MERCATOR, poTMMappings },
+    {CF_PT_TM, SRS_PT_TRANSVERSE_MERCATOR, poTMMappings },
     {"TM_south_oriented", SRS_PT_TRANSVERSE_MERCATOR_SOUTH_ORIENTED, NULL },
     {NULL, NULL, NULL },
 };
 
+/************************************************************************/
+/* ==================================================================== */
+/*			     netCDFDataset		                             		*/
+/* ==================================================================== */
+/************************************************************************/
 
 class netCDFRasterBand;
 
@@ -571,7 +601,7 @@ class netCDFDataset : public GDALPamDataset
 
     char **      FetchStandardParallels( const char *pszGridMappingValue );
 
-    static int IdentifyFileType( GDALOpenInfo *, bool );
+    static int IdentifyFormat( GDALOpenInfo *, bool );
 
   public:
     int           cdfid;
@@ -581,7 +611,7 @@ class netCDFDataset : public GDALPamDataset
     size_t        xdim, ydim;
     int           nDimXid, nDimYid;
     bool          bBottomUp;
-    int           nFileType;
+    int           nFormat;
     int           bIsGdalFile; /* was this file created by GDAL? */
     int           bIsGdalCfFile; /* was this file created by the (new) CF-compliant driver? */
 
