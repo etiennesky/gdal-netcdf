@@ -3891,6 +3891,16 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
             status = nc_def_var( fpImage, szBandName, nDataType, 
                                  NCDF_NBDIM, anBandDims, &NCDFVarID );
 
+#ifdef NETCDF_HAS_NC4
+            if ( nCompress == NCDF_COMPRESS_DEFLATE ) {
+                status = nc_def_var_deflate(fpImage,NCDFVarID,1,1,nZLevel);
+                NCDFErr( status );
+                // PDS: disable manual chunking control for now
+                // status = nc_def_var_chunking( fpImage, NCDFVarID, 
+                //                               NC_CHUNKED, chunksize );       
+            }
+#endif
+
             /* Fill Value */
             cNoDataValue=(signed char) dfNoDataValue;
             nc_put_att_schar( fpImage, NCDFVarID, _FillValue,
