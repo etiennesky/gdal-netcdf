@@ -274,12 +274,14 @@ static const oNetcdfSRS_PP poLAEAMappings[] = {
 //    * false_northing
 //
 // See http://www.remotesensing.org/geotiff/proj_list/lambert_conic_conformal_1sp.html 
-
-// Lambert conformal conic - 1SP
+// NOTE: export the SCALE_FACTOR_ORIGIN below is not a standard part of CF-1 for LCC,
+//  but until CF-1 projection params clarified, feel this is safest behaviour so as to
+//  not lose projection information.
 static const oNetcdfSRS_PP poLCC1SPMappings[] = {
     {STD_PARALLEL_1, SRS_PP_STANDARD_PARALLEL_1},
     {LAT_PROJ_ORIGIN, SRS_PP_LATITUDE_OF_ORIGIN},
     {LONG_CENTRAL_MERIDIAN, SRS_PP_CENTRAL_MERIDIAN},
+    {SCALE_FACTOR_ORIGIN, SRS_PP_SCALE_FACTOR},
     {FALSE_EASTING, SRS_PP_FALSE_EASTING },  
     {FALSE_NORTHING, SRS_PP_FALSE_NORTHING },
     {NULL, NULL}
