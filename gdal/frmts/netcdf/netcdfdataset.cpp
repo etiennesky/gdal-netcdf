@@ -3892,12 +3892,15 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                                  NCDF_NBDIM, anBandDims, &NCDFVarID );
 
 #ifdef NETCDF_HAS_NC4
+            /* TODO - find a way to avoid code duplication!!! */
             if ( nCompress == NCDF_COMPRESS_DEFLATE ) {
                 status = nc_def_var_deflate(fpImage,NCDFVarID,1,1,nZLevel);
                 NCDFErr( status );
-                // PDS: disable manual chunking control for now
-                // status = nc_def_var_chunking( fpImage, NCDFVarID, 
-                //                               NC_CHUNKED, chunksize );       
+                // must set chunk size to avoid huge performace hit
+                size_t chunksize[] = { 1, nXSize };
+                status = nc_def_var_chunking( fpImage, NCDFVarID, 
+                                              NC_CHUNKED, chunksize );       
+                NCDFErr( status );
             }
 #endif
 
@@ -3967,8 +3970,15 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                                  NCDF_NBDIM, anBandDims, &NCDFVarID );
 
 #ifdef NETCDF_HAS_NC4
-            if ( nCompress == NCDF_COMPRESS_DEFLATE )
+            if ( nCompress == NCDF_COMPRESS_DEFLATE ) {
                 status = nc_def_var_deflate(fpImage,NCDFVarID,1,1,nZLevel);
+                NCDFErr( status );
+                // must set chunk size to avoid huge performace hit
+                size_t chunksize[] = { 1, nXSize };
+                status = nc_def_var_chunking( fpImage, NCDFVarID, 
+                                              NC_CHUNKED, chunksize );       
+                NCDFErr( status );
+            }
 #endif
 
             nsNoDataValue= (GInt16) dfNoDataValue;
@@ -4020,8 +4030,15 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                                  NCDF_NBDIM, anBandDims, &NCDFVarID );
 
 #ifdef NETCDF_HAS_NC4
-            if ( nCompress == NCDF_COMPRESS_DEFLATE )
+            if ( nCompress == NCDF_COMPRESS_DEFLATE ) {
                 status = nc_def_var_deflate(fpImage,NCDFVarID,1,1,nZLevel);
+                NCDFErr( status );
+                // must set chunk size to avoid huge performace hit
+                size_t chunksize[] = { 1, nXSize };
+                status = nc_def_var_chunking( fpImage, NCDFVarID, 
+                                              NC_CHUNKED, chunksize );       
+                NCDFErr( status );
+            }
 #endif
             
             nlNoDataValue= (GInt32) dfNoDataValue;
@@ -4072,8 +4089,15 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                                  NCDF_NBDIM, anBandDims, &NCDFVarID );
 
 #ifdef NETCDF_HAS_NC4
-            if ( nCompress == NCDF_COMPRESS_DEFLATE )
+            if ( nCompress == NCDF_COMPRESS_DEFLATE ) {
                 status = nc_def_var_deflate(fpImage,NCDFVarID,1,1,nZLevel);
+                NCDFErr( status );
+                // must set chunk size to avoid huge performace hit
+                size_t chunksize[] = { 1, nXSize };
+                status = nc_def_var_chunking( fpImage, NCDFVarID, 
+                                              NC_CHUNKED, chunksize );       
+                NCDFErr( status );
+            }
 #endif
 
             fNoDataValue= (float) dfNoDataValue;
@@ -4124,8 +4148,15 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                                  NCDF_NBDIM, anBandDims, &NCDFVarID );
 
 #ifdef NETCDF_HAS_NC4
-            if ( nCompress == NCDF_COMPRESS_DEFLATE )
+            if ( nCompress == NCDF_COMPRESS_DEFLATE ) {
                 status = nc_def_var_deflate(fpImage,NCDFVarID,1,1,nZLevel);
+                NCDFErr( status );
+                // must set chunk size to avoid huge performace hit
+                size_t chunksize[] = { 1, nXSize };
+                status = nc_def_var_chunking( fpImage, NCDFVarID, 
+                                              NC_CHUNKED, chunksize );       
+                NCDFErr( status );
+            }
 #endif
 
             nc_put_att_double( fpImage, NCDFVarID, _FillValue,
