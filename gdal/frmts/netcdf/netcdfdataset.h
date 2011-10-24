@@ -92,13 +92,11 @@ void NCDFErr(int status)  { if ( status != NC_NOERR ) {
                   "netcdf error #%d : %s .\n", 
                   status, nc_strerror(status) ); } } 
 
-/* NC2 check may not have passed if using netcdf-3, no nc-config */
 #ifndef NETCDF_HAS_NC2
 #ifdef NC_64BIT_OFFSET
 #define NETCDF_HAS_NC2 1
 #endif
 #endif
-
 
 /* -------------------------------------------------------------------- */
 /*       CF or NUG (NetCDF User's Guide) defs                           */

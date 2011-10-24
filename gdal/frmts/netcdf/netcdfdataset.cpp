@@ -955,7 +955,7 @@ void netCDFDataset::SetProjection( int var )
     int          nSpacingBegin;
     int          nSpacingMiddle;
     int          nSpacingLast;
-    char         *pszUnits = NULL;
+    const char  *pszUnits = NULL;
 
     /* These values from GDAL metadata */
     const char *pszWKT = NULL;
@@ -1812,7 +1812,7 @@ void netCDFDataset::SetProjection( int var )
                     pszValue = CSLFetchNameValue( poDS->papszMetadata, 
                                                   szTemp );
                     if( pszValue != NULL ) {
-                        pszUnits = CPLStrdup( pszValue );
+                        pszUnits = pszValue;
                         if( EQUAL( pszValue, "km" ) ) {
                             xMinMax[0] = xMinMax[0] * 1000;
                             xMinMax[1] = xMinMax[1] * 1000;
@@ -1913,12 +1913,13 @@ void netCDFDataset::SetProjection( int var )
             /* Set the CRS to the one written by GDAL */
             if ( ! bGotCfSRS || poDS->pszProjection == NULL || ! bIsGdalCfFile ) {   
                 bGotGdalSRS = TRUE;
+                CPLFree(poDS->pszProjection);
                 poDS->pszProjection = CPLStrdup( pszWKT ); 
                 CPLDebug( "GDAL_netCDF", "set WKT from GDAL [%s]\n", poDS->pszProjection );
                 // CPLDebug( "GDAL_netCDF", "set WKT from GDAL" );
             }
             else { /* use the SRS from GDAL if it doesn't conflict with the one from CF */
-                char *pszProjectionGDAL = CPLStrdup( pszWKT );
+                char *pszProjectionGDAL = (char*) pszWKT ;
                 OGRSpatialReference oSRSGDAL;
                 oSRSGDAL.importFromWkt( &pszProjectionGDAL );
                 /* set datum to unknown or else datums will not match, see bug #4281 */
@@ -1927,6 +1928,7 @@ void netCDFDataset::SetProjection( int var )
                 if ( oSRS.IsSame(&oSRSGDAL) ) {
                     // printf("ARE SAME, using GDAL WKT\n");
                     bGotGdalSRS = TRUE;
+                    CPLFree(poDS->pszProjection);
                     poDS->pszProjection = CPLStrdup( pszWKT );
                     CPLDebug( "GDAL_netCDF", "set WKT from GDAL [%s]\n", poDS->pszProjection );
                     // CPLDebug( "GDAL_netCDF", "set WKT from GDAL" );
@@ -2076,6 +2078,8 @@ void netCDFDataset::SetProjection( int var )
             oSRSTmp.exportToPrettyWkt( &pszWKGCS );
             if ( oSRS.IsSameGeogCS(&oSRSTmp) ) {
                 oSRS.SetWellKnownGeogCS( pszWKGCSList[i] );
+                CPLFree(poDS->pszProjection);
+                poDS->pszProjection = NULL;
                 oSRS.exportToWkt( &(poDS->pszProjection) );
             }
         }
@@ -3877,7 +3881,6 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
             /* Byte can be of different type according to file version */
             /* PDS: don't use NC_UBYTE if NC4 Classic, since
                need to stick to classic NC3 datatypes in that case */
-
 #ifdef NETCDF_HAS_NC4
             if ( nFormat == NCDF_FORMAT_NC4 )
                 nDataType = NC_UBYTE;
@@ -3887,11 +3890,6 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
             status = nc_def_var( fpImage, szBandName, nDataType, 
                                  NCDF_NBDIM, anBandDims, &NCDFVarID );
-
-#ifdef NETCDF_HAS_NC4
-            if ( nCompress == NCDF_COMPRESS_DEFLATE )
-                status = nc_def_var_deflate(fpImage, NCDFVarID,1,1,nZLevel);
-#endif
 
             /* Fill Value */
             cNoDataValue=(signed char) dfNoDataValue;
@@ -3960,7 +3958,7 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
 #ifdef NETCDF_HAS_NC4
             if ( nCompress == NCDF_COMPRESS_DEFLATE )
-                status = nc_def_var_deflate(fpImage, NCDFVarID,1,1,nZLevel);
+                status = nc_def_var_deflate(fpImage,NCDFVarID,1,1,nZLevel);
 #endif
 
             nsNoDataValue= (GInt16) dfNoDataValue;
@@ -4013,7 +4011,7 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
 #ifdef NETCDF_HAS_NC4
             if ( nCompress == NCDF_COMPRESS_DEFLATE )
-                status = nc_def_var_deflate(fpImage, NCDFVarID,1,1,nZLevel);
+                status = nc_def_var_deflate(fpImage,NCDFVarID,1,1,nZLevel);
 #endif
             
             nlNoDataValue= (GInt32) dfNoDataValue;
@@ -4065,7 +4063,7 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
 #ifdef NETCDF_HAS_NC4
             if ( nCompress == NCDF_COMPRESS_DEFLATE )
-                status = nc_def_var_deflate(fpImage, NCDFVarID,1,1,nZLevel);
+                status = nc_def_var_deflate(fpImage,NCDFVarID,1,1,nZLevel);
 #endif
 
             fNoDataValue= (float) dfNoDataValue;
@@ -4117,7 +4115,7 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
 #ifdef NETCDF_HAS_NC4
             if ( nCompress == NCDF_COMPRESS_DEFLATE )
-                status = nc_def_var_deflate(fpImage, NCDFVarID,1,1,nZLevel);
+                status = nc_def_var_deflate(fpImage,NCDFVarID,1,1,nZLevel);
 #endif
 
             nc_put_att_double( fpImage, NCDFVarID, _FillValue,
