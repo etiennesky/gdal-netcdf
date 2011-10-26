@@ -317,7 +317,7 @@ def netcdf_8():
     if  proj != 'Albers_Conic_Equal_Area':
         gdaltest.post_reason( 'Projection does not match expected : ' + proj )
         return 'fail'
-    
+
     param = srs.GetProjParm('latitude_of_center')
     if param != 37.5:
         gdaltest.post_reason( 'Got wrong parameter value (%g)' % param )
