@@ -455,7 +455,7 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
                                     int nBand)
 
 {
-    double   dfNoData;
+    double   dfNoData = 0.0;
     int      bNoDataSet = FALSE;
     nc_type  vartype=NC_NAT;
     nc_type  atttype=NC_NAT;
@@ -634,6 +634,8 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
     
     if ( bNoDataSet ) 
         SetNoDataValue( dfNoData );
+    else 
+        CPLDebug( "GDAL_netCDF", "did not get nodata value for Band",);
 
     /* -------------------------------------------------------------------- */
     /* Attempt to fetch the scale_factor and add_offset attributes for the  */
@@ -4185,11 +4187,12 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
 /* -------------------------------------------------------------------- */
 /*      Re-open dataset, and copy any auxilary pam information.         */
+/*      Disable PAM, at least temporarily. See bug #4244                */
 /* -------------------------------------------------------------------- */
     netCDFDataset *poDS = (netCDFDataset *) GDALOpen( pszFilename, GA_ReadOnly );
 
-    if( poDS )
-        poDS->CloneInfo( poSrcDS, GCIF_PAM_DEFAULT );
+    // if( poDS )
+    //     poDS->CloneInfo( poSrcDS, GCIF_PAM_DEFAULT );
     
     pfnProgress( 1.0, NULL, pProgressData );
 
