@@ -113,6 +113,53 @@ def netcdf_setup():
  
     return 'success'
 
+###############################################################################
+#check support for DEFLATE compression, requires HDF5 and zlib
+def netcdf_test_deflate( tmpfile, checksum, zlevel=1 ):
+
+    if gdaltest.netcdf_drv is None:
+        return 'skip'
+
+    if not gdaltest.netcdf_drv_has_nc4:
+        return 'skip'
+
+    ifile = tmpfile;
+    ofile1 = 'tmp/' + ifile + '-1.nc'
+    ofile1_opts = [ 'FILETYPE=NC4C', 'COMPRESS=NONE']
+    ofile2 = 'tmp/' + ifile + '-2.nc'
+    ofile2_opts = [ 'FILETYPE=NC4C', 'COMPRESS=DEFLATE', 'ZLEVEL='+str(zlevel) ]
+
+    if not os.path.exists( 'data/'+tmpfile ):
+        if not gdaltest.download_file('http://download.osgeo.org/gdal/data/netcdf/'+tmpfile, tmpfile):
+            return 'skip'                
+        ifile = '../tmp/cache/'+tmpfile;
+
+    test1 = gdaltest.GDALTest( 'NETCDF', ifile, 1, checksum, options=ofile1_opts )
+    result1 = test1.testCreateCopy(check_gt=0, check_srs=0, new_filename=ofile1, delete_copy = 0, check_minmax = 0)
+
+    if result1 == 'fail':
+        return 'fail'
+
+    test2 = gdaltest.GDALTest( 'NETCDF', ifile, 1, checksum, options=ofile2_opts )
+    result2 = test2.testCreateCopy(check_gt=0, check_srs=0, new_filename=ofile2, delete_copy = 0, check_minmax = 0)
+
+    if result2 == 'fail':
+        return 'fail'
+
+    # make sure compressed file is smaller than uncompressed files
+    try:
+        size1 = os.path.getsize( ofile1 )
+        size2 = os.path.getsize( ofile2 )
+    except:
+        gdaltest.post_reason( 'Error getting file sizes.' )
+        return 'fail'
+
+    if  size2 >= size1:
+        gdaltest.post_reason( 'Compressed file is not smaller than reference, check HDF5 and zlib installation' )
+        return 'fail'
+
+    return 'success'
+
 
 ###############################################################################
 # Netcdf Tests
@@ -597,6 +644,52 @@ def netcdf_18():
 
     return 'success'
 
+###############################################################################
+#check support for reading with DEFLATE compression, requires NC4
+def netcdf_19():
+
+    if gdaltest.netcdf_drv is None:
+        return 'skip'
+
+    if not gdaltest.netcdf_drv_has_nc4:
+        return 'skip'
+
+    tst =  gdaltest.GDALTest( 'NetCDF', 'data/trmm-nc4z.nc', 1, 50235,
+                              filename_absolute = 1 )
+
+    result = tst.testOpen(skip_checksum = True)
+
+    return result
+
+###############################################################################
+#check support for writing with DEFLATE compression, requires NC4
+def netcdf_20():
+
+    if gdaltest.netcdf_drv is None:
+        return 'skip'
+
+    if not gdaltest.netcdf_drv_has_nc4:
+        return 'skip'
+
+    #simple test with tiny file
+    result1 = netcdf_test_deflate( 'utm.tif', 50235 )
+
+    #tests with larger files, will be downloaded if needed
+    result2 = netcdf_test_deflate( 'landsat-small.tif', 6953 )
+    #optional 'stress' test (25M file), don't alert if isn't done
+    val = gdal.GetConfigOption('GDAL_RUN_SLOW_TESTS', None)
+    if val != 'yes' and val != 'YES':
+        result3 = 'success'
+    else:
+        result3 = netcdf_test_deflate( 'landsat-big.tif', 22122, 6 )
+
+    if result1 == 'skip' or result2 == 'skip':
+        return 'skip'
+     
+    if result1 == 'fail' or result2 == 'fail' or result3 == 'fail':
+        return 'fail'
+
+    return 'success'
      
 ###############################################################################
 
@@ -618,7 +711,9 @@ gdaltest_list = [
     netcdf_15,
     netcdf_16,
     netcdf_17,
-    netcdf_18
+    netcdf_18,
+    netcdf_19,
+    netcdf_20,
  ]
 
 if __name__ == '__main__':
