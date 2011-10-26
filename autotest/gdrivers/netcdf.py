@@ -478,11 +478,7 @@ def netcdf_14():
 
 ###############################################################################
 #check support for netcdf-2 (64 bit)
-<<<<<<< HEAD
-# This test fails in 1.8.0, because the driver does not support it
-=======
 # This test fails in 1.8.0, because the driver does not support it (bug #3890)
->>>>>>> gdal-trunk
 def netcdf_15():
 
     if gdaltest.netcdf_drv is None:
