@@ -556,7 +556,6 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
 
     if( status == NC_NOERR ) {
         switch( atttype ) {
-            status = -1;
             /* TODO support NC_BYTE */
             case NC_CHAR:
                 char *fillc;
@@ -588,7 +587,8 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
                 status = nc_get_att_double( poDS->cdfid, nZId,
                                             szNoValueName, &dfNoData );
                 break;
-            default:
+            default:   
+                status = -1;
                 break;
         }
         // status = nc_get_att_double( poDS->cdfid, nZId, 
@@ -1054,7 +1054,8 @@ void netCDFDataset::SetProjection( int var )
 /* -------------------------------------------------------------------- */
     pszValue = CPLGetConfigOption( "GDAL_NETCDF_BOTTOMUP", NULL );
     if ( pszValue ) {
-        poDS->bBottomUp = CSLTestBoolean( pszValue );
+        poDS->bBottomUp = CSLTestBoolean( pszValue ) != FALSE;
+
     }
     else {
         if ( bIsGdalFile && ! bIsGdalCfFile ) 
@@ -2947,7 +2948,9 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
 
                 /* By default write NC_CHAR, but detect for int/float/double */
                 nMetaType = NC_CHAR;
-                nMetaValue = fMetaValue = dfMetaValue = 0;
+                nMetaValue = 0;
+                fMetaValue = 0.0f;
+                dfMetaValue = 0.0;
 
                 errno = 0;
                 nMetaValue = strtol( szMetaValue, &pszTemp, 10 );
@@ -4362,7 +4365,7 @@ void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist)
     //                           "history", pszOldHist );
     // printf("status: %d pszOldHist: [%s]\n",status,pszOldHist);
     
-    nNewHistSize = strlen(pszOldHist)+strlen(strtime)+strlen(pszAddHist)+1;
+    nNewHistSize = strlen(pszOldHist)+strlen(strtime)+strlen(pszAddHist)+1+1;
     pszNewHist = (char *) CPLMalloc(nNewHistSize * sizeof(char));
     
     strcpy(pszNewHist, strtime);
@@ -4376,7 +4379,7 @@ void NCDFAddHistory(int fpImage, const char *pszAddHist, const char *pszOldHist)
     }
 
     status = nc_put_att_text( fpImage, NC_GLOBAL, 
-                              "history", nNewHistSize,
+                              "history", strlen(pszNewHist),
                               pszNewHist ); 
     NCDF_ERR(status);
 
