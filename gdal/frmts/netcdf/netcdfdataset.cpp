@@ -587,7 +587,7 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
                 status = nc_get_att_double( poDS->cdfid, nZId,
                                             szNoValueName, &dfNoData );
                 break;
-            default:   
+            default:
                 status = -1;
                 break;
         }
@@ -1055,7 +1055,6 @@ void netCDFDataset::SetProjection( int var )
     pszValue = CPLGetConfigOption( "GDAL_NETCDF_BOTTOMUP", NULL );
     if ( pszValue ) {
         poDS->bBottomUp = CSLTestBoolean( pszValue ) != FALSE;
-
     }
     else {
         if ( bIsGdalFile && ! bIsGdalCfFile ) 
@@ -3024,13 +3023,13 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
 /*
 Driver options:
 
-WRITE_LONLAT=YES/NO/IF_NEEDED (default: YES for geographic, NO for projected)
-TYPE_LONLAT=float/double (default: double for geographic, float for projected)
-WRITE_GDAL_TAGS=YES/NO (default: YES)
-WRITE_BOTTOMUP=YES/NO (default: NO)
 FORMAT=NC/NC2/NC4/NC4C (COMPRESS=DEFLATE sets FORMAT=NC4C)
 COMPRESS=NONE/DEFLATE/PACKED (default: NONE)
 ZLEVEL=[1-9] (default: 6)
+WRITE_BOTTOMUP=YES/NO (default: NO)
+WRITE_GDAL_TAGS=YES/NO (default: YES)
+WRITE_LONLAT=YES/NO/IF_NEEDED (default: YES for geographic, NO for projected)
+TYPE_LONLAT=float/double (default: double for geographic, float for projected)
 
 Config Options:
 
@@ -3847,7 +3846,7 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         GInt32    *panScanline  = NULL;
         float     *pafScanline  = NULL;
         double    *padScanline  = NULL;
-        int       NCDFVarID;
+        int       NCDFVarID = 0;
         size_t    start[ NCDF_NBDIM ];
         size_t    starty[ nYSize ];
         size_t    count[ NCDF_NBDIM ];
@@ -4226,19 +4225,6 @@ void GDALRegister_netCDF()
 /* -------------------------------------------------------------------- */
     sprintf( szCreateOptions, "%s", 
 "<CreationOptionList>"
-"   <Option name='WRITE_LONLAT' type='string-select'>"
-"     <Value>YES</Value>"
-"     <Value>NO</Value>"
-"     <Value>IF_NEEDED</Value>"
-"   </Option>"
-"   <Option name='TYPE_LONLAT' type='string-select'>"
-"     <Value>float</Value>"
-"     <Value>double</Value>"
-"   </Option>"
-"   <Option name='WRITE_GDAL_TAGS' type='boolean' default='YES'>"
-"   </Option>"
-"   <Option name='WRITE_BOTTOMUP' type='boolean' default='NO'>"
-"   </Option>"
 "   <Option name='FORMAT' type='string-select' default='NC'>"
 "     <Value>NC</Value>"
 #ifdef NETCDF_HAS_NC2

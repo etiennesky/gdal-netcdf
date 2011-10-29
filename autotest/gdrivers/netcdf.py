@@ -38,7 +38,6 @@ sys.path.append( '../pymod' )
 import gdaltest
 
 import test_cli_utilities
-#from multiprocessing import Pool, TimeoutError
 from multiprocessing import Process
 
 ###############################################################################
@@ -68,20 +67,22 @@ def netcdf_setup():
         print('NOTICE: netcdf metadata not found, skipping checks')
         return 'skip'
 
-    if metadata.has_key('NETCDF_VERSION'):
+    #netcdf library version "3.6.3" of Dec 22 2009 06:10:17 $
+    #netcdf library version 4.1.1 of Mar  4 2011 12:52:19 $
+    if 'NETCDF_VERSION' in metadata:
         v = metadata['NETCDF_VERSION']
         v = v[ 0 : v.find(' ') ].strip('"');
         gdaltest.netcdf_drv_version = v
 
-    if metadata.has_key('NETCDF_HAS_NC2') \
+    if 'NETCDF_HAS_NC2' in metadata \
        and metadata['NETCDF_HAS_NC2'] == 'YES':
         gdaltest.netcdf_drv_has_nc2 = True
 
-    if metadata.has_key('NETCDF_HAS_NC4') \
+    if 'NETCDF_HAS_NC4' in metadata \
        and metadata['NETCDF_HAS_NC4'] == 'YES':
         gdaltest.netcdf_drv_has_nc4 = True
 
-    if metadata.has_key('NETCDF_HAS_HDF4') \
+    if 'NETCDF_HAS_HDF4' in metadata \
        and metadata['NETCDF_HAS_HDF4'] == 'YES':
         gdaltest.netcdf_drv_has_hdf4 = True
 
@@ -92,8 +93,15 @@ def netcdf_setup():
     return 'success'
 
 ###############################################################################
+# test file copy
+# helper function needed so we can call Process() on it from netcdf_test_copy_timeout()
+def netcdf_test_copy( ifile, band, checksum, ofile, opts=[], driver='NETCDF' ):
+    test = gdaltest.GDALTest( 'NETCDF', '../'+ifile, band, checksum, options=opts )
+    return test.testCreateCopy(check_gt=0, check_srs=0, new_filename=ofile, delete_copy = 0, check_minmax = 0)
+
+###############################################################################
 #test file copy, optional timeout arg
-def netcdf_test_copy( ifile, band, checksum, ofile, opts=[], driver='NETCDF', timeout = None ):
+def netcdf_test_copy_timeout( ifile, band, checksum, ofile, opts=[], driver='NETCDF', timeout=None ):
 
     result = 'success'
 
@@ -103,17 +111,18 @@ def netcdf_test_copy( ifile, band, checksum, ofile, opts=[], driver='NETCDF', ti
         drv.Delete( ofile )
 
     if timeout is None:
-        result = netcdf_test_copy1( ifile, band, checksum, ofile, opts, driver )
+        result = netcdf_test_copy( ifile, band, checksum, ofile, opts, driver )
 
     else:
         sys.stdout.write('.')
         sys.stdout.flush()
 
-        proc = Process( target=netcdf_test_copy1, args=(ifile, band, checksum, ofile, opts ) )
+        proc = Process( target=netcdf_test_copy, args=(ifile, band, checksum, ofile, opts ) )
         proc.start()
         proc.join( timeout )
 
         # if proc is alive after timeout we must terminate it, and return fail
+        # valgrind detects memory leaks when this occurs (although it should never happen)
         if proc.is_alive():
             proc.terminate()
             if os.path.exists( ofile ):
@@ -122,11 +131,6 @@ def netcdf_test_copy( ifile, band, checksum, ofile, opts=[], driver='NETCDF', ti
             result = 'fail'
             
     return result
-
-#helper function needed so we can call Process()
-def netcdf_test_copy1( ifile, band, checksum, ofile, opts, driver='NETCDF' ):
-    test = gdaltest.GDALTest( 'NETCDF', '../'+ifile, band, checksum, options=opts )
-    return test.testCreateCopy(check_gt=0, check_srs=0, new_filename=ofile, delete_copy = 0, check_minmax = 0)
 
 
 ###############################################################################
@@ -148,13 +152,9 @@ def netcdf_test_deflate( ifile, checksum, zlevel=1, timeout=None ):
         gdaltest.post_reason( 'ifile %s does not exist' % ifile )
         return 'fail'
  
-    #test1 = gdaltest.GDALTest( 'NETCDF', ifile, 1, checksum, options=ofile1_opts )
-    #result1 = test1.testCreateCopy(check_gt=0, check_srs=0, new_filename=ofile1, delete_copy = 0, check_minmax = 0)
-    result1 = netcdf_test_copy( ifile, 1, checksum, ofile1, ofile1_opts, 'NETCDF', timeout )
+    result1 = netcdf_test_copy_timeout( ifile, 1, checksum, ofile1, ofile1_opts, 'NETCDF', timeout )
 
-    #test2 = gdaltest.GDALTest( 'NETCDF', ifile, 1, checksum, options=ofile2_opts )
-    #result2 = test2.testCreateCopy(check_gt=0, check_srs=0, new_filename=ofile2, delete_copy = 0, check_minmax = 0)
-    result2 = netcdf_test_copy( ifile, 1, checksum, ofile2, ofile2_opts, 'NETCDF', timeout )
+    result2 = netcdf_test_copy_timeout( ifile, 1, checksum, ofile2, ofile2_opts, 'NETCDF', timeout )
 
     if result1 == 'fail' or result2 == 'fail':
         return 'fail'
@@ -690,7 +690,7 @@ def netcdf_20():
 
 ###############################################################################
 #check support for writing large file with DEFLATE compression
-#if chunking is not defined properly in the driver, this test can take 1h
+#if chunking is not defined properly within the netcdf driver, this test can take 1h
 def netcdf_21():
 
     if gdaltest.netcdf_drv is None:

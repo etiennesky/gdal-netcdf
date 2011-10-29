@@ -60,19 +60,20 @@ def netcdf_cf_setup():
         return 'skip'
 
     #skip if on windows
-    print( os.name )
     if os.name != 'posix':
         print('NOTICE: will skip CF checks because OS is not posix!')
         return 'skip'
 
     #try local method
+    cdms2_installed = False
     try:
         imp.find_module( 'cdms2' )
+        cdms2_installed = True
     except ImportError:
         print 'NOTICE: cdms2 not installed!'
         print '        see installation notes at http://pypi.python.org/pypi/cfchecker'
         pass
-    else:
+    if cdms2_installed:
         xml_dir = './data/netcdf_cf_xml'
         tmp_dir = './tmp/cache'
         files = dict()
@@ -101,11 +102,15 @@ def netcdf_cf_setup():
             print('NOTICE: netcdf CF compliance checks: using local checker script')
             return 'success'
 
-    #skip http method if 'GDAL_DOWNLOAD_TEST_DATA' os not defined
+    #skip http method if GDAL_DOWNLOAD_TEST_DATA and GDAL_RUN_SLOW_TESTS are not defined
     if not 'GDAL_DOWNLOAD_TEST_DATA' in os.environ: 
         print('NOTICE: skipping netcdf CF compliance checks')
         print('to enable remote http checker script, define GDAL_DOWNLOAD_TEST_DATA')
-    return 'success' 
+        return 'success' 
+
+    if not gdaltest.run_slow_tests(): 
+        print('NOTICE: skipping netcdf CF compliance checks')
+        return 'success' 
 
     #http method with curl, should use python module but easier for now
     success = False
@@ -146,9 +151,8 @@ def netcdf_cf_get_command(ifile, version='auto'):
                 + ' -v ' + version +' ' + ifile 
         elif method is 'http':
             #command = shlex.split( 'curl --form cfversion="1.5" --form upload=@' + ifile + ' --form submit=\"Check file\" "http://puma.nerc.ac.uk/cgi-bin/cf-checker.pl"' )
-            #for now use CF-1.2 (which is what the driver uses)
-            #switch to 1.5 when the driver is updated, and auto when it becomes available
-            version = '1.2'
+            #switch to 1.5 as driver now supports, and auto when it becomes available
+            version = '1.5'
             command = 'curl --form cfversion=' + version + ' --form upload=@' + ifile + ' --form submit=\"Check file\" "http://puma.nerc.ac.uk/cgi-bin/cf-checker.pl"'
 
     return command
@@ -168,7 +172,7 @@ def netcdf_cf_check_file(ifile,version='auto', silent=True):
     output_all = ''
 
     command = netcdf_cf_get_command(ifile, version='auto')
-    if command is None:
+    if command is None or command=='':
         gdaltest.post_reason('no suitable method found, skipping')
         return 'skip'
 
