@@ -40,7 +40,7 @@ import gdaltest
 
 import imp # for netcdf_cf_setup()
 import netcdf
-from netcdf import netcdf_setup
+from netcdf import netcdf_setup, netcdf_test_copy
 
 ###############################################################################
 # Netcdf CF compliance Functions
@@ -98,7 +98,7 @@ def netcdf_cf_setup():
         if os.path.exists(files['a']) and os.path.exists(files['s']) and os.path.exists(files['u']):
             gdaltest.netcdf_cf_method = 'local'
             gdaltest.netcdf_cf_files = files
-            print('NOTICE: netcdf CF compliance ckecks: using local checker script')
+            print('NOTICE: netcdf CF compliance checks: using local checker script')
             return 'success'
 
     #skip http method if 'GDAL_DOWNLOAD_TEST_DATA' os not defined
@@ -410,8 +410,6 @@ def netcdf_cfproj_testcopy(projTuples, origTiff, interFormats, inPath, outPath,
             (origTiff.rstrip('.tif'), proj[0] ))
         projRaster = os.path.join(outPath, "%s_%s.%s" % \
             (origTiff.rstrip('.tif'), proj[0], intExt ))
-#        projOpts = "-t_srs '%s'" % (proj[2])
-#        cmd = " ".join(['gdalwarp', projOpts, origTiff, projRaster])
         srs = osr.SpatialReference()
         srs.SetFromUserInput(proj[2])
         t_srs_wkt = srs.ExportToWkt()
@@ -428,8 +426,6 @@ def netcdf_cfproj_testcopy(projTuples, origTiff, interFormats, inPath, outPath,
             (origTiff.rstrip('.tif'), proj[0] ))
         #Force GDAL tags to be written to make testing easier, with preserved datum etc
         ncCoOpts = "-co WRITE_GDAL_TAGS=yes"
-#        cmd = " ".join(['gdal_translate', "-of netCDF", ncCoOpts, projRaster,
-#            projNc])
         if not silent:
             print("About to translate to NetCDF")
         dst = drv_netcdf.CreateCopy(projNc, dsw, 0, [ 'WRITE_GDAL_TAGS='+bWriteGdalTags ])
@@ -468,10 +464,8 @@ def netcdf_cfproj_testcopy(projTuples, origTiff, interFormats, inPath, outPath,
         projRaster2 = os.path.join(outPath, "%s_%s2.%s" % \
             (origTiff.rstrip('.tif'), proj[0], intExt ))
 
-        tst[i_t+1] = gdaltest.GDALTest( 'NETCDF', '../'+projRaster, 1, None)
-        tst_res[i_t+1] = tst[i_t+1].testCreateCopy(check_gt=1, check_srs=1, new_filename=projNc2, delete_copy = 0,check_minmax = 0, gt_epsilon=pow(10,-8))
-        tst[i_t+2] = gdaltest.GDALTest( intFmt, '../'+projNc2, 1, None )
-        tst_res[i_t+2] = tst[i_t+2].testCreateCopy(check_gt=1, check_srs=1, new_filename=projRaster2, delete_copy = 0,check_minmax = 0, gt_epsilon=pow(10,-8))
+        tst_res[i_t+1] = netcdf_test_copy( projRaster, 1, None, projNc2, [], 'NETCDF' )
+        tst_res[i_t+2] = netcdf_test_copy( projNc2, 1, None, projRaster2, [], intFmt )
 
         if  tst_res[i_t+1] == 'fail' or tst_res[i_t+2] == 'fail':
             result = 'fail'
@@ -556,11 +550,13 @@ def netcdf_cf_1():
     if gdaltest.netcdf_drv is None:
         return 'skip'
 
-    tst1 = gdaltest.GDALTest( 'NETCDF', 'trmm.tif', 1, 14 )
-    result = tst1.testCreateCopy(check_gt=1, check_srs=1, new_filename='tmp/netcdf_cf_1.nc', delete_copy = 0)
+    #tst1 = gdaltest.GDALTest( 'NETCDF', 'trmm.tif', 1, 14 )
+    #result = tst1.testCreateCopy(check_gt=1, check_srs=1, new_filename='tmp/netcdf_cf_1.nc', delete_copy = 0)
+    result = netcdf_test_copy( 'data/trmm.nc', 1, 14, 'tmp/netcdf_cf_1.nc' )
     if result != 'fail':
-        tst2 = gdaltest.GDALTest( 'GTIFF', '../tmp/netcdf_cf_1.nc', 1, 14 )       
-        result = tst2.testCreateCopy(check_gt=1, check_srs=1, new_filename='tmp/netcdf_cf_1.tiff', delete_copy = 0)
+        #tst2 = gdaltest.GDALTest( 'GTIFF', '../tmp/netcdf_cf_1.nc', 1, 14 )       
+        #result = tst2.testCreateCopy(check_gt=1, check_srs=1, new_filename='tmp/netcdf_cf_1.tiff', delete_copy = 0)
+        result = netcdf_test_copy( 'tmp/netcdf_cf_1.nc', 1, 14, 'tmp/netcdf_cf_1.tif', [], 'GTIFF' )
 
     result_cf = 'success'
     if gdaltest.netcdf_cf_method is not None:
@@ -579,8 +575,7 @@ def netcdf_cf_2():
     if gdaltest.netcdf_drv is None:
         return 'skip'
 
-    tst = gdaltest.GDALTest( 'NETCDF', 'trmm.nc', 1, 14 )
-    result = tst.testCreateCopy(check_gt=1, check_srs=1, new_filename='tmp/netcdf_cf_2.nc', delete_copy = 0)
+    result = netcdf_test_copy( 'data/trmm.nc', 1, 14, 'tmp/netcdf_cf_2.nc' )
 
     result_cf = 'success'
     if gdaltest.netcdf_cf_method is not None:
@@ -603,12 +598,12 @@ def netcdf_cf_3():
     result = 'success'
     result_cf = 'success'
 
-    tst = gdaltest.GDALTest( 'NETCDF', 'trmm-wgs84.tif', 1, 14 )
-    result = tst.testCreateCopy(check_gt=1, check_srs=1, new_filename='tmp/netcdf_cf_3.nc', delete_copy = 0)
+    result = netcdf_test_copy( 'data/trmm-wgs84.tif', 1, 14, 'tmp/netcdf_cf_3.nc' )
 
     if result == 'success':
-        tst = gdaltest.GDALTest( 'GTIFF', '../tmp/netcdf_cf_3.nc', 1, 14 )
-        result = tst.testCreateCopy(check_gt=1, check_srs=1, new_filename='tmp/netcdf_cf_3.tif', delete_copy = 0)
+        #tst = gdaltest.GDALTest( 'GTIFF', '../tmp/netcdf_cf_3.nc', 1, 14 )
+        #result = tst.testCreateCopy(check_gt=1, check_srs=1, new_filename='tmp/netcdf_cf_3.tif', delete_copy = 0)
+        result = netcdf_test_copy( 'tmp/netcdf_cf_3.nc', 1, 14, 'tmp/netcdf_cf_3.tif', [], 'GTIFF' )
 
     result_cf = 'success'
     if gdaltest.netcdf_cf_method is not None:

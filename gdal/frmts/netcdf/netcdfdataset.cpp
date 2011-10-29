@@ -635,7 +635,7 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
     if ( bNoDataSet ) 
         SetNoDataValue( dfNoData );
     else 
-        CPLDebug( "GDAL_netCDF", "did not get nodata value for Band",);
+        CPLDebug( "GDAL_netCDF", "did not get nodata value for variable #%d", nZId );
 
     /* -------------------------------------------------------------------- */
     /* Attempt to fetch the scale_factor and add_offset attributes for the  */
@@ -3233,6 +3233,8 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
     /* with refactoring this could be a function */
 #ifdef NETCDF_HAS_NC4
 // must set chunk size to avoid huge performace hit                
+// perhaps another solution it to change the chunk cache?
+// http://www.unidata.ucar.edu/software/netcdf/docs/netcdf.html#Chunk-Cache
 #define NCDF_DEF_VAR_DEFLATE \
            if ( nCompress == NCDF_COMPRESS_DEFLATE ) { \
                 status = nc_def_var_deflate(fpImage,NCDFVarID,1,1,nZLevel); \
@@ -3934,7 +3936,6 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
             NCDF_DEF_VAR_DEFLATE;
 
             /* Fill Value */
-            // cNoDataValue=(signed char) dfNoDataValue;
             cNoDataValue=(unsigned char) dfNoDataValue;
             nc_put_att_schar( fpImage, NCDFVarID, _FillValue,
                               nDataType, 1, &cNoDataValue );            
@@ -4210,9 +4211,15 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 void GDALRegister_netCDF()
 
 {
-    GDALDriver	*poDriver;
+    if (! GDAL_CHECK_VERSION("netCDF driver"))
+        return;
 
-    char szCreateOptions[3072];
+    if( GDALGetDriverByName( "netCDF" ) == NULL )
+    {
+        GDALDriver	*poDriver;
+        char szCreateOptions[3072];
+
+        poDriver = new GDALDriver( );
 
 /* -------------------------------------------------------------------- */
 /*      Build full creation option list.                                */
@@ -4251,13 +4258,10 @@ void GDALRegister_netCDF()
 #endif
 "</CreationOptionList>" );
 
-    if (! GDAL_CHECK_VERSION("netCDF driver"))
-        return;
-
-    if( GDALGetDriverByName( "netCDF" ) == NULL )
-    {
-        poDriver = new GDALDriver( );
         
+/* -------------------------------------------------------------------- */
+/*      Set the driver details.                                         */
+/* -------------------------------------------------------------------- */
         poDriver->SetDescription( "netCDF" );
         poDriver->SetMetadataItem( GDAL_DMD_LONGNAME, 
                                    "Network Common Data Format" );
@@ -4267,6 +4271,26 @@ void GDALRegister_netCDF()
         poDriver->SetMetadataItem( GDAL_DMD_CREATIONOPTIONLIST, 
                                    szCreateOptions );
 
+        /* make driver config and capabilities available */
+        poDriver->SetMetadataItem( "NETCDF_VERSION", nc_inq_libvers() );
+        poDriver->SetMetadataItem( "NETCDF_CONVENTIONS", NCDF_CONVENTIONS_CF );
+#ifdef NETCDF_HAS_NC2
+        poDriver->SetMetadataItem( "NETCDF_HAS_NC2", "YES" );
+#endif
+#ifdef NETCDF_HAS_NC4
+        poDriver->SetMetadataItem( "NETCDF_HAS_NC4", "YES" );
+#endif
+#ifdef NETCDF_HAS_HDF4
+        poDriver->SetMetadataItem( "NETCDF_HAS_HDF4", "YES" );
+#endif
+#ifdef HAVE_HDF4
+        poDriver->SetMetadataItem( "GDAL_HAS_HDF4", "YES" );
+#endif
+#ifdef HAVE_HDF5
+        poDriver->SetMetadataItem( "GDAL_HAS_HDF5", "YES" );
+#endif
+ 
+        /* set pfns and register driver */
         poDriver->pfnOpen = netCDFDataset::Open;
         poDriver->pfnCreateCopy = NCDFCreateCopy;
         poDriver->pfnIdentify = netCDFDataset::Identify;
@@ -4441,8 +4465,6 @@ void NCDFWriteProjAttribs( const OGR_SRSNode *poPROJCS,
     //results to write
     std::vector< std::pair<std::string,double> > oOutList;
  
-    // pszProjection="None"; //for testing
-
     /* Find the appropriate mapping */
     for (int iMap = 0; poNetcdfSRS_PT[iMap].WKT_SRS != NULL; iMap++ ) {
         // printf("now at %d, proj=%s\n",i, poNetcdfSRS_PT[i].GDAL_SRS);
@@ -4469,17 +4491,10 @@ void NCDFWriteProjAttribs( const OGR_SRSNode *poPROJCS,
         poMap = poGenericMappings;
     }
 
-    // for (int i = 0; poMap[i].GDAL_ATT != NULL; i++ ) {
-    //     CPLDebug( "GDAL_netCDF","attribute map: %s %s\n",
-    //               poMap[i].NCDF_ATT,poMap[i].GDAL_ATT);
-    // }
-
     /* initialize local map objects */
     for ( int iMap = 0; poMap[iMap].WKT_ATT != NULL; iMap++ ) {
         oAttMap[poMap[iMap].WKT_ATT] = poMap[iMap].CF_ATT;
     }
-    // for ( oAttIter = oAttMap.begin(); oAttIter != oAttMap.end(); oAttIter++ )
-    //     printf ("GDAL ATT=[%s] NCDF ATT=[%s]\n",(oAttIter->first).c_str(),(oAttIter->second).c_str());
 
     for( int iChild = 0; iChild < poPROJCS->GetChildCount(); iChild++ ) {
 
@@ -4494,8 +4509,6 @@ void NCDFWriteProjAttribs( const OGR_SRSNode *poPROJCS,
 
         oValMap[pszParamStr] = atof(pszParamVal);
     }
-    // for ( oValIter = oValMap.begin(); oValIter != oValMap.end(); oValIter++ )
-    //     printf ("GDAL ATT=[%s] value=[%f]\n",(oValIter->first).c_str(),(oValIter->second));
 
     /* Lookup mappings and fill output vector */
     if ( poMap != poGenericMappings ) { /* specific mapping, loop over mapping values */

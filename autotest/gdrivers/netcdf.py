@@ -37,6 +37,10 @@ sys.path.append( '../pymod' )
 
 import gdaltest
 
+import test_cli_utilities
+#from multiprocessing import Pool, TimeoutError
+from multiprocessing import Process
+
 ###############################################################################
 # Netcdf Functions
 ###############################################################################
@@ -46,76 +50,88 @@ import gdaltest
 
 def netcdf_setup():
 
-    gdaltest.netcdf_drv_version = None
+    gdaltest.netcdf_drv_version = 'unknown'
     gdaltest.netcdf_drv_has_nc2 = False
     gdaltest.netcdf_drv_has_nc4 = False
-    gdaltest.netcdf_drv = gdal.GetDriverByName( 'NETCDF' )
+    gdaltest.netcdf_drv_has_hdf4 = False
     gdaltest.netcdf_drv_silent = False;
+
+    gdaltest.netcdf_drv = gdal.GetDriverByName( 'NETCDF' )
 
     if gdaltest.netcdf_drv is None:
         print('NOTICE: netcdf not supported, skipping checks')
         return 'skip'
 
-    #ugly hack to get netcdf version with 'ncdump', available in netcdf v3 avnd v4
-    try:
-        (ret, err) = gdaltest.runexternal_out_and_err('ncdump -h')
-#        (ret, err) = gdaltest.runexternal_out_and_err('LD_LIBRARY_PATH=/home/src/netcdf-test/usr/lib:$LD_LIBRARY_PATH /home/src/netcdf-test/usr/bin/ncdump -h')
-    except:
-        #nothing is supported as ncdump not found
-        print('NOTICE: netcdf version not found')
-        return 'success'
-    
-    i = err.find('netcdf library version ')
-    #version not found
-    if i == -1:
-        print('NOTICE: netcdf version not found')
-        return 'success'
+    #get capabilities from driver
+    metadata = gdaltest.netcdf_drv.GetMetadata()
+    if metadata is None:
+        print('NOTICE: netcdf metadata not found, skipping checks')
+        return 'skip'
 
-    #netcdf library version "3.6.3" of Dec 22 2009 06:10:17 $
-    #netcdf library version 4.1.1 of Mar  4 2011 12:52:19 $
-    v = err[ i+23 : ]
-    v = v[ 0 : v.find(' ') ]
-    v = v.strip('"');
+    if metadata.has_key('NETCDF_VERSION'):
+        v = metadata['NETCDF_VERSION']
+        v = v[ 0 : v.find(' ') ].strip('"');
+        gdaltest.netcdf_drv_version = v
 
-    gdaltest.netcdf_drv_version = v
-
-    #for version 3, assume nc2 supported and nc4 unsupported
-    if v[0] == '3':
+    if metadata.has_key('NETCDF_HAS_NC2') \
+       and metadata['NETCDF_HAS_NC2'] == 'YES':
         gdaltest.netcdf_drv_has_nc2 = True
-        gdaltest.netcdf_drv_has_nc4 = False
 
-    # for version 4, use nc-config to test
-    elif v[0] == '4':
+    if metadata.has_key('NETCDF_HAS_NC4') \
+       and metadata['NETCDF_HAS_NC4'] == 'YES':
+        gdaltest.netcdf_drv_has_nc4 = True
+
+    if metadata.has_key('NETCDF_HAS_HDF4') \
+       and metadata['NETCDF_HAS_HDF4'] == 'YES':
+        gdaltest.netcdf_drv_has_hdf4 = True
+
+    print( 'NOTICE: using netcdf version ' + gdaltest.netcdf_drv_version + \
+               '  has_nc2: '+str(gdaltest.netcdf_drv_has_nc2)+'  has_nc4: ' + \
+               str(gdaltest.netcdf_drv_has_nc4) )
     
-        #check if netcdf library has nc2 (64-bit) support
-        #this should be done at configure time by gdal like in cdo
-        try:
-            ret = gdaltest.runexternal('nc-config --has-nc2')
-        except:
-            gdaltest.netcdf_drv_has_nc2 = False
-        else:
-            #should test this on windows
-            if ret.rstrip() == 'yes':
-                gdaltest.netcdf_drv_has_nc2 = True
-                    
-        #check if netcdf library has nc4 support
-        #this should be done at configure time by gdal like in cdo
-        try:
-            ret = gdaltest.runexternal('nc-config --has-nc4')
-        except:
-            gdaltest.netcdf_drv_has_nc4 = False
-        else:
-            #should test this on windows
-            if ret.rstrip() == 'yes':
-                gdaltest.netcdf_drv_has_nc4 = True
-
-    print('NOTICE: using netcdf version ' + gdaltest.netcdf_drv_version+'  has_nc2: '+str(gdaltest.netcdf_drv_has_nc2)+'  has_nc4: '+str(gdaltest.netcdf_drv_has_nc4))
- 
     return 'success'
 
 ###############################################################################
+#test file copy, optional timeout arg
+def netcdf_test_copy( ifile, band, checksum, ofile, opts=[], driver='NETCDF', timeout = None ):
+
+    result = 'success'
+
+    drv = gdal.GetDriverByName( driver )
+
+    if os.path.exists( ofile ):
+        drv.Delete( ofile )
+
+    if timeout is None:
+        result = netcdf_test_copy1( ifile, band, checksum, ofile, opts, driver )
+
+    else:
+        sys.stdout.write('.')
+        sys.stdout.flush()
+
+        proc = Process( target=netcdf_test_copy1, args=(ifile, band, checksum, ofile, opts ) )
+        proc.start()
+        proc.join( timeout )
+
+        # if proc is alive after timeout we must terminate it, and return fail
+        if proc.is_alive():
+            proc.terminate()
+            if os.path.exists( ofile ):
+                drv.Delete( ofile )
+            print('testCreateCopy() for file %s has reached timeout limit of %d seconds' % (ofile, timeout) )
+            result = 'fail'
+            
+    return result
+
+#helper function needed so we can call Process()
+def netcdf_test_copy1( ifile, band, checksum, ofile, opts, driver='NETCDF' ):
+    test = gdaltest.GDALTest( 'NETCDF', '../'+ifile, band, checksum, options=opts )
+    return test.testCreateCopy(check_gt=0, check_srs=0, new_filename=ofile, delete_copy = 0, check_minmax = 0)
+
+
+###############################################################################
 #check support for DEFLATE compression, requires HDF5 and zlib
-def netcdf_test_deflate( tmpfile, checksum, zlevel=1 ):
+def netcdf_test_deflate( ifile, checksum, zlevel=1, timeout=None ):
 
     if gdaltest.netcdf_drv is None:
         return 'skip'
@@ -123,27 +139,24 @@ def netcdf_test_deflate( tmpfile, checksum, zlevel=1 ):
     if not gdaltest.netcdf_drv_has_nc4:
         return 'skip'
 
-    ifile = tmpfile;
-    ofile1 = 'tmp/' + ifile + '-1.nc'
+    ofile1 = 'tmp/' + os.path.basename(ifile) + '-1.nc'
     ofile1_opts = [ 'FILETYPE=NC4C', 'COMPRESS=NONE']
-    ofile2 = 'tmp/' + ifile + '-2.nc'
+    ofile2 = 'tmp/' + os.path.basename(ifile) + '-2.nc'
     ofile2_opts = [ 'FILETYPE=NC4C', 'COMPRESS=DEFLATE', 'ZLEVEL='+str(zlevel) ]
 
-    if not os.path.exists( 'data/'+tmpfile ):
-        if not gdaltest.download_file('http://download.osgeo.org/gdal/data/netcdf/'+tmpfile, tmpfile):
-            return 'skip'                
-        ifile = '../tmp/cache/'+tmpfile;
-
-    test1 = gdaltest.GDALTest( 'NETCDF', ifile, 1, checksum, options=ofile1_opts )
-    result1 = test1.testCreateCopy(check_gt=0, check_srs=0, new_filename=ofile1, delete_copy = 0, check_minmax = 0)
-
-    if result1 == 'fail':
+    if not os.path.exists( ifile ):
+        gdaltest.post_reason( 'ifile %s does not exist' % ifile )
         return 'fail'
+ 
+    #test1 = gdaltest.GDALTest( 'NETCDF', ifile, 1, checksum, options=ofile1_opts )
+    #result1 = test1.testCreateCopy(check_gt=0, check_srs=0, new_filename=ofile1, delete_copy = 0, check_minmax = 0)
+    result1 = netcdf_test_copy( ifile, 1, checksum, ofile1, ofile1_opts, 'NETCDF', timeout )
 
-    test2 = gdaltest.GDALTest( 'NETCDF', ifile, 1, checksum, options=ofile2_opts )
-    result2 = test2.testCreateCopy(check_gt=0, check_srs=0, new_filename=ofile2, delete_copy = 0, check_minmax = 0)
+    #test2 = gdaltest.GDALTest( 'NETCDF', ifile, 1, checksum, options=ofile2_opts )
+    #result2 = test2.testCreateCopy(check_gt=0, check_srs=0, new_filename=ofile2, delete_copy = 0, check_minmax = 0)
+    result2 = netcdf_test_copy( ifile, 1, checksum, ofile2, ofile2_opts, 'NETCDF', timeout )
 
-    if result2 == 'fail':
+    if result1 == 'fail' or result2 == 'fail':
         return 'fail'
 
     # make sure compressed file is smaller than uncompressed files
@@ -155,7 +168,7 @@ def netcdf_test_deflate( tmpfile, checksum, zlevel=1 ):
         return 'fail'
 
     if  size2 >= size1:
-        gdaltest.post_reason( 'Compressed file is not smaller than reference, check HDF5 and zlib installation' )
+        gdaltest.post_reason( 'Compressed file is not smaller than reference, check your netcdf-4, HDF5 and zlib installation' )
         return 'fail'
 
     return 'success'
@@ -525,7 +538,7 @@ def netcdf_14():
 
 ###############################################################################
 #check support for netcdf-2 (64 bit)
-# This test fails in 1.8.0, because the driver does not support it (bug #3890)
+# This test fails in 1.8.1, because the driver does not support NC2 (bug #3890)
 def netcdf_15():
 
     if gdaltest.netcdf_drv is None:
@@ -672,25 +685,55 @@ def netcdf_20():
         return 'skip'
 
     #simple test with tiny file
-    result1 = netcdf_test_deflate( 'utm.tif', 50235 )
+    return netcdf_test_deflate( 'data/utm.tif', 50235 )
 
-    #tests with larger files, will be downloaded if needed
-    result2 = netcdf_test_deflate( 'landsat-small.tif', 6953 )
-    #optional 'stress' test (25M file), don't alert if isn't done
-    val = gdal.GetConfigOption('GDAL_RUN_SLOW_TESTS', None)
-    if val != 'yes' and val != 'YES':
-        result3 = 'success'
-    else:
-        result3 = netcdf_test_deflate( 'landsat-big.tif', 22122, 6 )
 
-    if result1 == 'skip' or result2 == 'skip':
+###############################################################################
+#check support for writing large file with DEFLATE compression
+#if chunking is not defined properly in the driver, this test can take 1h
+def netcdf_21():
+
+    if gdaltest.netcdf_drv is None:
         return 'skip'
-     
-    if result1 == 'fail' or result2 == 'fail' or result3 == 'fail':
-        return 'fail'
 
-    return 'success'
+    if not gdaltest.netcdf_drv_has_nc4:
+        return 'skip'
+
+    if not gdaltest.run_slow_tests():
+        return 'skip'
+
+    bigfile = 'tmp/cache/utm-big.tif'
+
+    sys.stdout.write('.')
+    sys.stdout.flush()
+
+    #look for large gtiff in cache
+    if not os.path.exists( bigfile ):
+
+        #create large gtiff
+        if test_cli_utilities.get_gdalwarp_path() is None:
+            gdaltest.post_reason('gdalwarp failed')
+            return 'fail'
+    
+        warp_cmd = test_cli_utilities.get_gdalwarp_path() +\
+            ' -q -overwrite -r bilinear -ts 7680 7680 -of gtiff ' +\
+            'data/utm.tif ' + bigfile
+
+        try:
+            (ret, err) = gdaltest.runexternal_out_and_err( warp_cmd )
+        except:
+            gdaltest.post_reason('gdalwarp failed')
+            return 'fail'
+        
+        if ( err != '' or ret != '' ):
+            gdaltest.post_reason('gdalwarp failed')
+        #print(ret)
+            return 'fail'
+
+    # test compression of the file, with a conservative timeout of 60 seconds
+    return netcdf_test_deflate( bigfile, 26695, 6, 60 )
      
+
 ###############################################################################
 
 gdaltest_list = [
@@ -714,6 +757,7 @@ gdaltest_list = [
     netcdf_18,
     netcdf_19,
     netcdf_20,
+    netcdf_21,
  ]
 
 if __name__ == '__main__':
