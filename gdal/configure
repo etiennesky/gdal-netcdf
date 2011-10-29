@@ -716,6 +716,10 @@ FGDB_ENABLED
 HAVE_OPENJPEG
 JASPER_FLAGS
 HAVE_JASPER
+NETCDF_HAS_HDF4
+NETCDF_HAS_NC4
+NETCDF_ROOT
+NETCDF_SETTING
 HDF5_INCLUDE
 HAVE_HDF5
 HDF4_INCLUDE
@@ -734,7 +738,6 @@ PCIDSK_INCLUDE
 PCIDSK_LIB
 PCIDSK_SETTING
 PNG_SETTING
-NETCDF_SETTING
 PCRASTER_SETTING
 FITS_SETTING
 HAVE_GRASS
@@ -868,7 +871,6 @@ with_grass
 with_libgrass
 with_cfitsio
 with_pcraster
-with_netcdf
 with_png
 with_pcidsk
 with_libtiff
@@ -880,6 +882,7 @@ with_ogdi
 with_fme
 with_hdf4
 with_hdf5
+with_netcdf
 with_jasper
 with_openjpeg
 with_fgdb
@@ -1603,7 +1606,6 @@ Optional Packages:
   --with-libgrass=ARG   Include GRASS support based on libgrass (GRASS 5.0+)
   --with-cfitsio=ARG    Include FITS support (ARG=no or libcfitsio path)
   --with-pcraster=ARG   Include PCRaster (libcsf) support (ARG=internal, no or path)
-  --with-netcdf=ARG     Include netCDF support (ARG=no or netCDF tree prefix)
   --with-png=ARG        Include PNG support (ARG=internal, no or path)
   --with-pcidsk=ARG     Path to external PCIDSK SDK, or internal (default), or old
   --with-libtiff=ARG    Libtiff library to use (ARG=internal, yes or path)
@@ -1615,6 +1617,7 @@ Optional Packages:
   --with-fme=ARG        Include FMEObjects support (ARG=FME_HOME path)
   --with-hdf4=ARG       Include HDF4 support (ARG=path)
   --with-hdf5=ARG       Include HDF5 support (ARG=path)
+  --with-netcdf=ARG     Include netCDF support (ARG=no or netCDF tree prefix)
   --with-jasper=ARG     Include JPEG-2000 support via JasPer library (ARG=path)
   --with-openjpeg=ARG     Include JPEG-2000 support via OpenJPEG v2 library (ARG=path)
   --with-fgdb=ARG        Include ESRI File Geodatabase support (ARG=FGDP API Path, yes or no)
@@ -19351,93 +19354,6 @@ fi
 
 
 
-# Check whether --with-netcdf was given.
-if test "${with_netcdf+set}" = set; then :
-  withval=$with_netcdf;
-fi
-
-
-if test "$with_netcdf" = "no" ; then
-
-  NETCDF_SETTING=no
-
-  echo "netCDF support disabled."
-
-elif test "$with_netcdf" = "yes" -o "$with_netcdf" = "" ; then
-
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for nc_open in -lnetcdf" >&5
-$as_echo_n "checking for nc_open in -lnetcdf... " >&6; }
-if ${ac_cv_lib_netcdf_nc_open+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lnetcdf  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-#ifdef __cplusplus
-extern "C"
-#endif
-char nc_open ();
-int
-main ()
-{
-return nc_open ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"; then :
-  ac_cv_lib_netcdf_nc_open=yes
-else
-  ac_cv_lib_netcdf_nc_open=no
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_netcdf_nc_open" >&5
-$as_echo "$ac_cv_lib_netcdf_nc_open" >&6; }
-if test "x$ac_cv_lib_netcdf_nc_open" = xyes; then :
-  NETCDF_SETTING=yes
-else
-  NETCDF_SETTING=no
-fi
-
-
-  if test "$NETCDF_SETTING" = "yes" ; then
-    LIBS="-lnetcdf $LIBS"
-    echo "using pre-installed libnetcdf."
-  else
-    echo "libnetcdf not found - netCDF support disabled"
-  fi
-
-  if test "$NETCDF_SETTING" = "yes" -a -d /usr/include/netcdf ; then
-    EXTRA_INCLUDES="-I/usr/include/netcdf $EXTRA_INCLUDES"
-  elif test "$NETCDF_SETTING" = "yes" -a -d /usr/include/netcdf-3 ; then
-    EXTRA_INCLUDES="-I/usr/include/netcdf-3 $EXTRA_INCLUDES"
-  fi
-else
-
-  NETCDF_SETTING=yes
-  LIBS="-L$with_netcdf -L$with_netcdf/lib -lnetcdf $LIBS"
-  EXTRA_INCLUDES="-I$with_netcdf -I$with_netcdf/include $EXTRA_INCLUDES"
-
-  echo "using libnetcdf from $with_netcdf."
-fi
-
-NETCDF_SETTING=$NETCDF_SETTING
-
-
-if test "$NETCDF_SETTING" != "no" ; then
-  OPT_GDAL_FORMATS="netcdf $OPT_GDAL_FORMATS"
-fi
-
-
-
 # Check whether --with-png was given.
 if test "${with_png+set}" = set; then :
   withval=$with_png;
@@ -21007,6 +20923,153 @@ HDF5_INCLUDE=$HDF5_INCLUDE
 
 if test "$HAVE_HDF5" != "no" ; then
   OPT_GDAL_FORMATS="hdf5 $OPT_GDAL_FORMATS"
+fi
+
+
+
+
+# Check whether --with-netcdf was given.
+if test "${with_netcdf+set}" = set; then :
+  withval=$with_netcdf;
+fi
+
+
+if test "$with_netcdf" = "no" ; then
+
+  NETCDF_SETTING=no
+
+  echo "netCDF support disabled."
+
+elif test "$with_netcdf" = "yes" -o "$with_netcdf" = "" ; then
+
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for nc_open in -lnetcdf" >&5
+$as_echo_n "checking for nc_open in -lnetcdf... " >&6; }
+if ${ac_cv_lib_netcdf_nc_open+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lnetcdf  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char nc_open ();
+int
+main ()
+{
+return nc_open ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_lib_netcdf_nc_open=yes
+else
+  ac_cv_lib_netcdf_nc_open=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_netcdf_nc_open" >&5
+$as_echo "$ac_cv_lib_netcdf_nc_open" >&6; }
+if test "x$ac_cv_lib_netcdf_nc_open" = xyes; then :
+  NETCDF_SETTING=yes
+else
+  NETCDF_SETTING=no
+fi
+
+
+  if test "$NETCDF_SETTING" = "yes" ; then
+    LIBS="-lnetcdf $LIBS"
+    echo "using pre-installed libnetcdf."
+  else
+    echo "libnetcdf not found - netCDF support disabled"
+  fi
+
+  if test "$NETCDF_SETTING" = "yes" -a -d /usr/include/netcdf ; then
+    EXTRA_INCLUDES="-I/usr/include/netcdf $EXTRA_INCLUDES"
+    NETCDF_ROOT="/usr"
+  elif test "$NETCDF_SETTING" = "yes" -a -d /usr/include/netcdf-3 ; then
+    EXTRA_INCLUDES="-I/usr/include/netcdf-3 $EXTRA_INCLUDES"
+    NETCDF_ROOT="/usr"
+  fi
+else
+
+  NETCDF_SETTING=yes
+  LIBS="-L$with_netcdf -L$with_netcdf/lib -lnetcdf $LIBS"
+  EXTRA_INCLUDES="-I$with_netcdf -I$with_netcdf/include $EXTRA_INCLUDES"
+  NETCDF_ROOT="$with_netcdf"
+
+  echo "using libnetcdf from $with_netcdf"
+fi
+
+  if test "$NETCDF_SETTING" = "yes" ; then
+
+    ncdump=$NETCDF_ROOT"/bin/ncdump"
+    nc_config=""
+
+        if { test -x "$ncdump"; }; then
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking libnetcdf version with $ncdump" >&5
+$as_echo_n "checking libnetcdf version with $ncdump... " >&6; }
+      netcdf_version=`$ncdump 2>&1 | grep "netcdf library version" | awk '{gsub(/"/,"");print $4}'`
+      { $as_echo "$as_me:${as_lineno-$LINENO}: result: got $netcdf_version" >&5
+$as_echo "got $netcdf_version" >&6; }
+      if test "$netcdf_version" != "" -a "${netcdf_version:0:1}" == "4" ; then
+          nc_config=$NETCDF_ROOT"/bin/nc-config"
+      fi
+    fi
+
+        if { test -x "$nc_config"; }; then
+      echo "checking libnetcdf config with $nc_config"
+
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking for netcdf-4 (and HDF5) support in libnetcdf" >&5
+$as_echo_n "checking for netcdf-4 (and HDF5) support in libnetcdf... " >&6; }
+        if test "x$($nc_config --has-nc4)" = "xyes"; then :
+          { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+          NETCDF_HAS_NC4=yes
+        else
+          { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+          NETCDF_HAS_NC4=no
+        fi
+
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking for HDF4 support in libnetcdf" >&5
+$as_echo_n "checking for HDF4 support in libnetcdf... " >&6; }
+        if test "x$($nc_config --has-hdf4)" = "xyes"; then :
+          { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+          NETCDF_HAS_HDF4=yes
+        else
+          { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+          NETCDF_HAS_HDF4=no
+        fi
+
+    else
+      { $as_echo "$as_me:${as_lineno-$LINENO}: result: ncdump and/or nc-config not found, skipping netcdf-4 tests" >&5
+$as_echo "ncdump and/or nc-config not found, skipping netcdf-4 tests" >&6; }
+      NETCDF_HAS_NC4=no
+      NETCDF_HAS_HDF4=no
+    fi
+fi
+
+NETCDF_SETTING=$NETCDF_SETTING
+
+NETCDF_ROOT=$NETCDF_ROOT
+
+NETCDF_HAS_NC4=$NETCDF_HAS_NC4
+
+NETCDF_HAS_HDF4=$NETCDF_HAS_HDF4
+
+if test "$NETCDF_SETTING" != "no" ; then
+  OPT_GDAL_FORMATS="netcdf $OPT_GDAL_FORMATS"
 fi
 
 
@@ -25691,7 +25754,6 @@ $as_echo "yes" >&6; }
 fi
 
 PAM_SETTING=$PAM_SETTING
-
 
 
 

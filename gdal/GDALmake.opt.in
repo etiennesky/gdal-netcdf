@@ -134,6 +134,7 @@ LIBS	   +=	$(MYSQL_LIB)
 #
 # HDF4 Support.
 #
+HAVE_HDF4     = @HAVE_HDF4@
 HDF4_INCLUDE  = @HDF4_INCLUDE@ -I$(GDAL_ROOT)/ogr
 
 #
@@ -141,6 +142,13 @@ HDF4_INCLUDE  = @HDF4_INCLUDE@ -I$(GDAL_ROOT)/ogr
 #
 HAVE_HDF5     = @HAVE_HDF5@
 HDF5_INCLUDE  = @HDF5_INCLUDE@ 
+
+#
+# NetCDF Support.
+#
+NETCDF_ROOT = @NETCDF_ROOT@
+NETCDF_HAS_NC4 = @NETCDF_HAS_NC4@
+NETCDF_HAS_HDF4 = @NETCDF_HAS_HDF4@
 
 #
 # DODS Include file location
@@ -432,7 +440,7 @@ GDAL_FORMATS = 	gxf gtiff hfa aigrid aaigrid ceos ceos2 iso8211 xpm \
 		nitf bmp pcidsk airsar rs2 ilwis rmf leveller sgi srtmhgt \
 		idrisi gsg ingr ers jaxapalsar dimap gff cosar pds adrg \
 		coasp tsx terragen blx msgn til r northwood saga xyz hf2 \
-		kmlsuperoverlay ozi ctg e00grid zmap \
+		kmlsuperoverlay ozi ctg e00grid zmap ngsgeoid \
 		@OPT_GDAL_FORMATS@
 
 
