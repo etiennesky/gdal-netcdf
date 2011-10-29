@@ -70,8 +70,8 @@ def netcdf_cf_setup():
         imp.find_module( 'cdms2' )
         cdms2_installed = True
     except ImportError:
-        print 'NOTICE: cdms2 not installed!'
-        print '        see installation notes at http://pypi.python.org/pypi/cfchecker'
+        print( 'NOTICE: cdms2 not installed!' )
+        print( '        see installation notes at http://pypi.python.org/pypi/cfchecker' )
         pass
     if cdms2_installed:
         xml_dir = './data/netcdf_cf_xml'

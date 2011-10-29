@@ -4241,6 +4241,19 @@ void GDALRegister_netCDF()
 "     <Value>DEFLATE</Value>"
 "   </Option>"
 "   <Option name='ZLEVEL' type='int' description='DEFLATE compression level 1-9' default='1'/>"
+"   <Option name='WRITE_BOTTOMUP' type='boolean' default='NO'>"
+"   </Option>"
+"   <Option name='WRITE_GDAL_TAGS' type='boolean' default='YES'>"
+"   </Option>"
+"   <Option name='WRITE_LONLAT' type='string-select'>"
+"     <Value>YES</Value>"
+"     <Value>NO</Value>"
+"     <Value>IF_NEEDED</Value>"
+"   </Option>"
+"   <Option name='TYPE_LONLAT' type='string-select'>"
+"     <Value>float</Value>"
+"     <Value>double</Value>"
+"   </Option>"
 #endif
 "</CreationOptionList>" );
 
