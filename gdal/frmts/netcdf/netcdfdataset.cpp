@@ -82,6 +82,8 @@ printf("Is unsigned\n");
 ET: - remove valid_range from metadata export like offset
     - fix valid_range metadata value in gdalinfo, looks like junk 
       -> must make generic function which returns char*
+- make sure status variable is used for all nc_, rename to nc_err/nc_status
+-see where can use templates/functions to shorten code
 */
 
 
@@ -103,12 +105,14 @@ class netCDFRasterBand : public GDALPamRasterBand
     int         *panBandZLev;
     int         bNoDataSet;
     double      dfNoDataValue;
+    double      adfValidRange[2];
     double      dfScale;
     double      dfOffset;
     int         bSignedData;
-    int         nValidRange[2];
 
     CPLErr	    CreateBandMetadata( ); 
+    template <class T> void  CheckValidData ( void * pImage, 
+                                              int bCheckIsNan=FALSE ) ;
     
   public:
 
@@ -330,8 +334,8 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
 /*  Look for valid_range or valid_min/valid_max                         */
 /* -------------------------------------------------------------------- */
     /* set valid_range to nodata, then check for actual values */
-    nValidRange[0] = dfNoData;
-    nValidRange[1] = dfNoData;
+    adfValidRange[0] = dfNoData;
+    adfValidRange[1] = dfNoData;
     /* first look for valid_range */
     int bGotValidRange = FALSE;
     status = nc_inq_att( poDS->cdfid, nZId, 
@@ -343,24 +347,27 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
                                  "valid_range", vrange ); 
         if( status == NC_NOERR ) {
             bGotValidRange = TRUE;
-            nValidRange[0] = vrange[0];
-            nValidRange[1] = vrange[1];
+            adfValidRange[0] = vrange[0];
+            adfValidRange[1] = vrange[1];
         }
         /* if not found look for valid_min and valid_max */
         else {
             status = nc_get_att_int( poDS->cdfid, nZId,
                                      "valid_min", &vmin );
             if( status == NC_NOERR ) {
-                nValidRange[0] = vmin;
+                adfValidRange[0] = vmin;
                 status = nc_get_att_int( poDS->cdfid, nZId,
                                          "valid_max", &vmax );
                 if( status == NC_NOERR ) {
-                    nValidRange[1] = vmax;
+                    adfValidRange[1] = vmax;
                     bGotValidRange = TRUE;
                 }
             }
         }
     }
+
+    CPLDebug( "GDAL_netCDF", "got valid_range={%f,%f}",
+              adfValidRange[0], adfValidRange[1] );
 
 /* -------------------------------------------------------------------- */
 /*  Special For Byte Bands: check for signed/unsigned byte              */
@@ -383,12 +390,18 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
             /* http://www.unidata.ucar.edu/software/netcdf/docs/netcdf/Attribute-Conventions.html */
             if ( bGotValidRange == TRUE ) {
                 /* If we got valid_range={0,255}, treat as unsigned */
-                if ( (nValidRange[0] == 0) && (nValidRange[1] == 255) ) {
+                if ( (adfValidRange[0] == 0) && (adfValidRange[1] == 255) ) {
                     bSignedData = FALSE;
+                    /* reset valid_range */
+                    adfValidRange[0] = dfNoData;
+                    adfValidRange[1] = dfNoData;
                 }
                 /* If we got valid_range={-128,127}, treat as signed */
-                else if ( (nValidRange[0] == -128) && (nValidRange[1] == 127) ) {
+                else if ( (adfValidRange[0] == -128) && (adfValidRange[1] == 127) ) {
                     bSignedData = TRUE;
+                    /* reset valid_range */
+                    adfValidRange[0] = dfNoData;
+                    adfValidRange[1] = dfNoData;
                 }
             }
             /* else test for _Unsigned */
@@ -410,6 +423,12 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
                 }
             }
         }
+
+        if ( bSignedData )
+            CPLDebug( "GDAL_netCDF", "got signed Byte" );
+        else 
+            CPLDebug( "GDAL_netCDF", "got unsigned Byte" );
+
     }
 
 
@@ -518,6 +537,8 @@ CPLErr netCDFRasterBand::SetNoDataValue( double dfNoData )
 
     return CE_None;
 }
+
+
 
 /************************************************************************/
 /*                         CreateBandMetadata()                         */
@@ -769,6 +790,39 @@ CPLErr netCDFRasterBand::CreateBandMetadata( )
     return CE_None;
 }
 
+template <class T>
+void  netCDFRasterBand::CheckValidData ( void * pImage, int bCheckIsNan ) 
+{
+    int i;
+    CPLAssert( pImage != NULL );
+
+    /* check if needed or requested */
+    if (  (adfValidRange[0] != dfNoDataValue) || 
+          (adfValidRange[1] != dfNoDataValue) ||
+          bCheckIsNan ) {
+
+        for( i=0; i<nBlockXSize; i++ ) {         
+            /* check for nodata and nan */
+            if ( CPLIsEqual( ((T *)pImage)[i], (T) dfNoDataValue ) )
+                continue;
+            if( bCheckIsNan && CPLIsNan( ( (T *) pImage)[i] ) ) {
+                ( (T *)pImage )[i] = (T)dfNoDataValue;
+                continue;
+            }
+            /* check for valid_range */
+            if ( ( ( adfValidRange[0] != dfNoDataValue ) && 
+                   ( ((T *)pImage)[i] < (T)adfValidRange[0] ) ) 
+                 || 
+                 ( ( adfValidRange[1] != dfNoDataValue ) && 
+                   ( ((T *)pImage)[i] > (T)adfValidRange[1] ) ) ) {
+                ( (T *)pImage )[i] = (T)dfNoDataValue;
+            }
+        }
+        
+    }
+
+}
+
 /************************************************************************/
 /*                             IReadBlock()                             */
 /************************************************************************/
@@ -786,6 +840,7 @@ CPLErr netCDFRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
     int    Sum=-1;
     int    Taken=-1;
     int    nd;
+    int    bCheckValidRange = FALSE; /*TMP ET remove */
 
     *pszName='\0';
     memset( start, 0, sizeof( start ) );
@@ -842,43 +897,59 @@ CPLErr netCDFRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
         }
     }
 
+
+    if (  (adfValidRange[0] != dfNoDataValue) || 
+          (adfValidRange[1] != dfNoDataValue) ) 
+        bCheckValidRange = TRUE;
+
     if( eDataType == GDT_Byte ) {
         if (this->bSignedData) {
             nErr = nc_get_vara_schar( cdfid, nZId, start, edge, 
                                       (signed char *) pImage );
+            if ( nErr == NC_NOERR ) CheckValidData<signed char>( pImage ); 
         }
         else {
             nErr = nc_get_vara_uchar( cdfid, nZId, start, edge, 
                                       (unsigned char *) pImage );
+            if ( nErr == NC_NOERR ) CheckValidData<unsigned char>( pImage ); 
         }
     }
     else if( eDataType == GDT_Int16 )
+    {
         nErr = nc_get_vara_short( cdfid, nZId, start, edge, 
                                   (short int *) pImage );
+        if ( nErr == NC_NOERR ) CheckValidData<short int>( pImage ); 
+    }
     else if( eDataType == GDT_Int32 )
     {
-        if( sizeof(long) == 4 )
+        if( sizeof(long) == 4 ) {
             nErr = nc_get_vara_long( cdfid, nZId, start, edge, 
                                      (long *) pImage );
-        else
+            if ( nErr == NC_NOERR ) CheckValidData<long>( pImage ); 
+        }
+        else {
             nErr = nc_get_vara_int( cdfid, nZId, start, edge, 
                                     (int *) pImage );
+            if ( nErr == NC_NOERR ) CheckValidData<int>( pImage ); 
+        }
     }
     else if( eDataType == GDT_Float32 ){
         nErr = nc_get_vara_float( cdfid, nZId, start, edge, 
                                   (float *) pImage );
-        for( i=0; i<nBlockXSize; i++ ){
-            if( CPLIsNan( ( (float *) pImage )[i] ) )
-                ( (float *)pImage )[i] = (float) dfNoDataValue;
-        }
+        // for( i=0; i<nBlockXSize; i++ ){
+        //     if( CPLIsNan( ( (float *) pImage )[i] ) )
+        //         ( (float *)pImage )[i] = (float) dfNoDataValue;
+        // }
+        if ( nErr == NC_NOERR ) CheckValidData<float>( pImage, TRUE ); 
     }
     else if( eDataType == GDT_Float64 ){
         nErr = nc_get_vara_double( cdfid, nZId, start, edge, 
                                    (double *) pImage );
-        for( i=0; i<nBlockXSize; i++ ){
-            if( CPLIsNan( ( (double *) pImage)[i] ) ) 
-                ( (double *)pImage )[i] = dfNoDataValue;
-        }
+        // for( i=0; i<nBlockXSize; i++ ){
+        //     if( CPLIsNan( ( (double *) pImage)[i] ) ) 
+        //         ( (double *)pImage )[i] = dfNoDataValue;
+        // }
+        if ( nErr == NC_NOERR ) CheckValidData<double>( pImage, TRUE ); 
 
     }
 
@@ -889,7 +960,7 @@ CPLErr netCDFRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
                   nc_strerror( nErr ) );
         return CE_Failure;
     }
-    else
+    else 
         return CE_None;
 }
 
@@ -3057,10 +3128,18 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
                 /* for variables, don't copy varname */
                 if ( strncmp( szMetaName, "NETCDF_VARNAME", 14) == 0 ) 
                     bCopyItem = FALSE;
-                /* Remove add_offset and scale_factor, but set them later from band data */
+                /* Don't copy band statistics */
+                else if ( strncmp( szMetaName, "STATISTICS_", 11) == 0 ) 
+                    bCopyItem = FALSE;
+                /* Remove add_offset, scale_factor, valid_range and _Unsigned */
+                /* but set them later from band data */
                 else if ( strcmp( szMetaName, CF_ADD_OFFSET ) == 0 ) 
                     bCopyItem = FALSE;
                 else if ( strcmp( szMetaName, CF_SCALE_FACTOR ) == 0 ) 
+                    bCopyItem = FALSE;
+                else if ( strcmp( szMetaName, "valid_range" ) == 0 ) 
+                    bCopyItem = FALSE;
+                else if ( strcmp( szMetaName, "_Unsigned" ) == 0 ) 
                     bCopyItem = FALSE;
             }
 
@@ -4098,21 +4177,21 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
             /* For unsigned NC_BYTE (except NC4 format) */
             /* add valid_range and _Unsigned ( defined in CF-1 and NUG ) */
             if ( (nDataType == NC_BYTE) && (nFormat != NCDF_FORMAT_NC4) ) {
-                short int nValidRange[2]; 
+                short int adfValidRange[2]; 
                 if  ( nSignedByte ) {
-                    nValidRange[0] = -128;
-                    nValidRange[1] = 127;
+                    adfValidRange[0] = -128;
+                    adfValidRange[1] = 127;
                     status = nc_put_att_text( fpImage, NCDFVarID, 
                                               "_Unsigned", 5, "false" );
                 }
                 else {
-                    nValidRange[0] = 0;
-                    nValidRange[1] = 255;
+                    adfValidRange[0] = 0;
+                    adfValidRange[1] = 255;
                     status = nc_put_att_text( fpImage, NCDFVarID, 
                                               "_Unsigned", 4, "true" );
                 }
                 status=nc_put_att_short( fpImage, NCDFVarID, "valid_range",
-                                         NC_SHORT, 2, nValidRange );
+                                         NC_SHORT, 2, adfValidRange );
             }
             
 /* -------------------------------------------------------------------- */
