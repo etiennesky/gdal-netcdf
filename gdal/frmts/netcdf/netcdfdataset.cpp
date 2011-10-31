@@ -47,6 +47,14 @@ void NCDFWriteProjAttribs(const OGR_SRSNode *poPROJCS,
                             const char* pszProjection,
                             const int fpImage, const int NCDFVarID);
 
+CPLErr NCDFSafeStrcat(char** ppszDest, char* pszSrc, size_t* nDestSize);
+
+char * NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName, 
+                    double *padfValue=NULL, int *panAttrLen=NULL );
+
+int NCDFPutAttr( int nCdfId, int nVarId, 
+                 const char *pszAttrName, const char *pszValue );
+
 /************************************************************************/
 /*                         MISC Notes                                   */
 /************************************************************************/
@@ -69,21 +77,6 @@ void NCDFWriteProjAttribs(const OGR_SRSNode *poPROJCS,
 /*
 TODO
 
-- test signed byte import
-// Detect unsigned Byte data 
-    int bUnsignedByte = TRUE;
-if ( this->eDataType == GDT_Byte &&
-( atttype == NC_CHAR && EQUAL(szMetaTemp,"_Unsigned") 
-&& ( EQUAL(szTemp,"true") || EQUAL(szTemp,"1") ) ) ) {
-bUnsigned = TRUE;
-printf("Is unsigned\n");
-}
-
-ET: - remove valid_range from metadata export like offset
-    - fix valid_range metadata value in gdalinfo, looks like junk 
-      -> must make generic function which returns char*
-- make sure status variable is used for all nc_, rename to nc_err/nc_status
--see where can use templates/functions to shorten code
 */
 
 
@@ -248,48 +241,11 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
     nc_inq_vartype( poDS->cdfid, nZId, &vartype );
 
     if( status == NC_NOERR ) {
-        switch( atttype ) {
-            /* TODO support NC_BYTE */
-            case NC_CHAR:
-                char *fillc;
-                fillc = (char *) CPLCalloc( attlen+1, sizeof(char) );
-                status=nc_get_att_text( poDS->cdfid, nZId,
-                                        szNoValueName, fillc );
-                dfNoData = atof( fillc );
-                CPLFree(fillc);
-                break;
-            case NC_SHORT:
-                short sNoData;
-                status = nc_get_att_short( poDS->cdfid, nZId,
-                                           szNoValueName, &sNoData );
-                dfNoData = (double) sNoData;
-                break;
-            case NC_INT:
-                int nNoData;
-                status = nc_get_att_int( poDS->cdfid, nZId,
-                                         szNoValueName, &nNoData );
-                dfNoData = (double) nNoData;
-                break;
-            case NC_FLOAT:
-                float fNoData;
-                status = nc_get_att_float( poDS->cdfid, nZId,
-                                           szNoValueName, &fNoData );
-                dfNoData = (double) fNoData;
-                break;
-            case NC_DOUBLE:
-                status = nc_get_att_double( poDS->cdfid, nZId,
-                                            szNoValueName, &dfNoData );
-                break;
-            default:
-                status = -1;
-                break;
-        }
-        // status = nc_get_att_double( poDS->cdfid, nZId, 
-        //                             szNoValueName, &dfNoData );
 
-        if ( status == NC_NOERR )
+        if ( NCDFGetAttr( poDS->cdfid, nZId, szNoValueName, 
+                          &dfNoData) != NULL )
             bNoDataSet = TRUE;
-	
+
     }
     /* if not found NoData, set the default one */
     if ( ! bNoDataSet ) { 
@@ -539,7 +495,6 @@ CPLErr netCDFRasterBand::SetNoDataValue( double dfNoData )
 }
 
 
-
 /************************************************************************/
 /*                         CreateBandMetadata()                         */
 /************************************************************************/
@@ -549,6 +504,7 @@ CPLErr netCDFRasterBand::CreateBandMetadata( )
     char     szVarName[NC_MAX_NAME];
     char     szMetaName[NC_MAX_NAME];
     char     szMetaTemp[NCDF_MAX_STR_LEN];
+    char     *pszMetaValue = NULL;
     char     szTemp[NC_MAX_NAME];
     const char *pszValue;
 
@@ -565,14 +521,6 @@ CPLErr netCDFRasterBand::CreateBandMetadata( )
 
     nc_type  nVarType = NC_NAT;
     int      nAtt=0;
-    nc_type  atttype = NC_NAT;
-    size_t   attlen;
-    float    fval;
-    double   dval;
-    short    sval;
-    // short    sval[2];
-    int      ival;
-    int      bValidMeta;
 
     netCDFDataset *poDS;
     poDS = (netCDFDataset *) this->poDS;
@@ -723,68 +671,28 @@ CPLErr netCDFRasterBand::CreateBandMetadata( )
 /* -------------------------------------------------------------------- */
 
     nc_inq_varnatts( poDS->cdfid, nZId, &nAtt );
+
     for( i=0; i < nAtt ; i++ ) {
-        bValidMeta = TRUE;
-    	status = nc_inq_attname( poDS->cdfid, nZId, 
-    				 i, szTemp);
-    	status = nc_inq_att( poDS->cdfid, nZId, 
-    			     szTemp, &atttype, &attlen);
-    	if(strcmp(szTemp,_FillValue) ==0) continue;
-    	sprintf( szMetaTemp,"%s",szTemp);       
 
-    	switch( atttype ) {
-            /* TODO support NC_BYTE */
-    	case NC_CHAR:
-    	    char *fillc;
-    	    fillc = (char *) CPLCalloc( attlen+1, sizeof(char) );
-    	    status=nc_get_att_text( poDS->cdfid, nZId,
-    				    szTemp, fillc );
-    	    // SetMetadataItem( szMetaTemp, fillc );
-    	    sprintf( szTemp,"%s",fillc);
-    	    CPLFree(fillc);
-    	    break;
-    	case NC_SHORT:
-    	    status = nc_get_att_short( poDS->cdfid, nZId,
-    				     szTemp, &sval );
-    	    sprintf( szTemp,"%d",sval);
-    	    // status = nc_get_att_short( poDS->cdfid, nZId,
-    		// 		     szTemp, sval );
-    	    // sprintf( szTemp,"%d %d",sval[0],sval[1]);
-    	    // SetMetadataItem( szMetaTemp, szTemp );
-    	    break;
-    	case NC_INT:
-    	    status = nc_get_att_int( poDS->cdfid, nZId,
-    				     szTemp, &ival );
-    	    sprintf( szTemp,"%d",ival);
-    	    // SetMetadataItem( szMetaTemp, szTemp );
-    	    break;
-    	case NC_FLOAT:
-    	    status = nc_get_att_float( poDS->cdfid, nZId,
-    				       szTemp, &fval );
-    	    sprintf( szTemp,"%.7g",fval);
-    	    // SetMetadataItem( szMetaTemp, szTemp );
-    	    break;
-    	case NC_DOUBLE:
-    	    status = nc_get_att_double( poDS->cdfid, nZId,
-                                        szTemp, &dval );
-    	    sprintf( szTemp,"%.15g",dval);
-            // SetMetadataItem( szMetaTemp, szTemp );
-    	    break;
-    	default:
-            bValidMeta = FALSE;
-    	    break;
-    	}
+    	status = nc_inq_attname( poDS->cdfid, nZId, i, szTemp);
+    	// if(strcmp(szTemp,_FillValue) ==0) continue;
+    	sprintf( szMetaName,"%s",szTemp);       
 
-        if ( bValidMeta ) {
-            CPLDebug( "GDAL_netCDF", "setting metadata %s=%s, type=%d, len=%lu", 
-                      szMetaTemp, szTemp, atttype, attlen );
-           SetMetadataItem( szMetaTemp, szTemp );
+        pszMetaValue = NCDFGetAttr( poDS->cdfid, nZId, szMetaName);
+        if ( pszMetaValue ) {
+            // CPLDebug( "GDAL_netCDF", "setting metadata %s=%s", 
+            //           szMetaName, pszMetaValue );
+            SetMetadataItem( szMetaName, pszMetaValue );
         }
         else {
-            CPLDebug( "GDAL_netCDF", "invalid metadata %s, type=%d, len=%lu", 
-                      szMetaTemp, atttype, attlen );
+            CPLDebug( "GDAL_netCDF", "invalid Band metadata %s", szMetaName );
         }
-        
+
+        if ( pszMetaValue )  {
+            CPLFree( pszMetaValue );
+            pszMetaValue = NULL;
+        }
+
     }
 
     return CE_None;
@@ -831,7 +739,7 @@ CPLErr netCDFRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
                                      void * pImage )
 
 {
-    int    nErr=-1;
+    int    status=-1;
     int    cdfid = ( ( netCDFDataset * ) poDS )->cdfid;
     size_t start[ MAX_NC_DIMS ];
     size_t edge[ MAX_NC_DIMS ];
@@ -904,60 +812,52 @@ CPLErr netCDFRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
 
     if( eDataType == GDT_Byte ) {
         if (this->bSignedData) {
-            nErr = nc_get_vara_schar( cdfid, nZId, start, edge, 
+            status = nc_get_vara_schar( cdfid, nZId, start, edge, 
                                       (signed char *) pImage );
-            if ( nErr == NC_NOERR ) CheckValidData<signed char>( pImage ); 
+            if ( status == NC_NOERR ) CheckValidData<signed char>( pImage ); 
         }
         else {
-            nErr = nc_get_vara_uchar( cdfid, nZId, start, edge, 
+            status = nc_get_vara_uchar( cdfid, nZId, start, edge, 
                                       (unsigned char *) pImage );
-            if ( nErr == NC_NOERR ) CheckValidData<unsigned char>( pImage ); 
+            if ( status == NC_NOERR ) CheckValidData<unsigned char>( pImage ); 
         }
     }
     else if( eDataType == GDT_Int16 )
     {
-        nErr = nc_get_vara_short( cdfid, nZId, start, edge, 
+        status = nc_get_vara_short( cdfid, nZId, start, edge, 
                                   (short int *) pImage );
-        if ( nErr == NC_NOERR ) CheckValidData<short int>( pImage ); 
+        if ( status == NC_NOERR ) CheckValidData<short int>( pImage ); 
     }
     else if( eDataType == GDT_Int32 )
     {
         if( sizeof(long) == 4 ) {
-            nErr = nc_get_vara_long( cdfid, nZId, start, edge, 
+            status = nc_get_vara_long( cdfid, nZId, start, edge, 
                                      (long *) pImage );
-            if ( nErr == NC_NOERR ) CheckValidData<long>( pImage ); 
+            if ( status == NC_NOERR ) CheckValidData<long>( pImage ); 
         }
         else {
-            nErr = nc_get_vara_int( cdfid, nZId, start, edge, 
+            status = nc_get_vara_int( cdfid, nZId, start, edge, 
                                     (int *) pImage );
-            if ( nErr == NC_NOERR ) CheckValidData<int>( pImage ); 
+            if ( status == NC_NOERR ) CheckValidData<int>( pImage ); 
         }
     }
     else if( eDataType == GDT_Float32 ){
-        nErr = nc_get_vara_float( cdfid, nZId, start, edge, 
+        status = nc_get_vara_float( cdfid, nZId, start, edge, 
                                   (float *) pImage );
-        // for( i=0; i<nBlockXSize; i++ ){
-        //     if( CPLIsNan( ( (float *) pImage )[i] ) )
-        //         ( (float *)pImage )[i] = (float) dfNoDataValue;
-        // }
-        if ( nErr == NC_NOERR ) CheckValidData<float>( pImage, TRUE ); 
+        if ( status == NC_NOERR ) CheckValidData<float>( pImage, TRUE ); 
     }
     else if( eDataType == GDT_Float64 ){
-        nErr = nc_get_vara_double( cdfid, nZId, start, edge, 
+        status = nc_get_vara_double( cdfid, nZId, start, edge, 
                                    (double *) pImage );
-        // for( i=0; i<nBlockXSize; i++ ){
-        //     if( CPLIsNan( ( (double *) pImage)[i] ) ) 
-        //         ( (double *)pImage )[i] = dfNoDataValue;
-        // }
-        if ( nErr == NC_NOERR ) CheckValidData<double>( pImage, TRUE ); 
+        if ( status == NC_NOERR ) CheckValidData<double>( pImage, TRUE ); 
 
     }
 
-    if( nErr != NC_NOERR )
+    if( status != NC_NOERR )
     {
         CPLError( CE_Failure, CPLE_AppDefined, 
                   "netCDF scanline fetch failed: %s", 
-                  nc_strerror( nErr ) );
+                  nc_strerror( status ) );
         return CE_Failure;
     }
     else 
@@ -1069,9 +969,17 @@ char** netCDFDataset::FetchStandardParallels( const char *pszGridMappingValue )
     strcat( szTemp, "#" );
     strcat( szTemp, CF_PP_STD_PARALLEL );
     pszValue = CSLFetchNameValue( papszMetadata, szTemp );
-    if( pszValue != NULL )
-        papszValues = CSLTokenizeString2( pszValue, ",", CSLT_STRIPLEADSPACES |
+    if( pszValue != NULL ) {
+        // papszValues = CSLTokenizeString2( pszValue, ",", CSLT_STRIPLEADSPACES |
+        //                                   CSLT_STRIPENDSPACES );
+        /* format has changed to { std1, std2 }, must remove { and } */
+        strcpy( szTemp,pszValue );
+        int last_char = strlen(pszValue) - 1;
+        if ( szTemp[0] == '{' ) szTemp[0] = ' ';
+        if ( szTemp[last_char] == '}' ) szTemp[last_char] = ' ';
+        papszValues = CSLTokenizeString2( szTemp, ",", CSLT_STRIPLEADSPACES |
                                           CSLT_STRIPENDSPACES );
+    }
     //try gdal tags
     else
     {
@@ -2323,17 +2231,6 @@ double netCDFDataset::rint( double dfX)
 /************************************************************************/
 /*                        ReadAttributes()                              */
 /************************************************************************/
-CPLErr netCDFDataset::SafeStrcat(char** ppszDest, char* pszSrc, size_t* nDestSize)
-{
-    /* Reallocate the data string until the content fits */
-    while(*nDestSize < (strlen(*ppszDest) + strlen(pszSrc) + 1)) {
-        (*nDestSize) *= 2;
-        *ppszDest = (char*) CPLRealloc((void*) *ppszDest, *nDestSize);
-    }
-    strcat(*ppszDest, pszSrc);
-    
-    return CE_None;
-}
 
 CPLErr netCDFDataset::ReadAttributes( int cdfid, int var)
 
@@ -2342,11 +2239,7 @@ CPLErr netCDFDataset::ReadAttributes( int cdfid, int var)
     char    szVarName [ NC_MAX_NAME ];
     char    szMetaName[ NC_MAX_NAME * 2 ];
     char    *pszMetaTemp = NULL;
-    size_t  nMetaTempSize;
-    nc_type nAttrType;
-    size_t  nAttrLen, m;
     int     nbAttr;
-    char    szTemp[ NCDF_MAX_STR_LEN ];
 
     nc_inq_varnatts( cdfid, var, &nbAttr );
     if( var == NC_GLOBAL ) {
@@ -2360,80 +2253,23 @@ CPLErr netCDFDataset::ReadAttributes( int cdfid, int var)
 	
         nc_inq_attname( cdfid, var, l, szAttrName);
         sprintf( szMetaName, "%s#%s", szVarName, szAttrName  );
-        nc_inq_att( cdfid, var, szAttrName, &nAttrType, &nAttrLen );
-	
-        /* Allocate guaranteed minimum size */
-        nMetaTempSize = nAttrLen + 1;
-        pszMetaTemp = (char *) CPLCalloc( nMetaTempSize, sizeof( char ));
-        *pszMetaTemp = '\0';
-	
-        switch (nAttrType) {
-            /* TODO support NC_BYTE */
-            case NC_CHAR:
-                nc_get_att_text( cdfid, var, szAttrName, pszMetaTemp );
-                pszMetaTemp[nAttrLen]='\0';
-                break;
-            case NC_SHORT:
-                short *psTemp;
-                psTemp = (short *) CPLCalloc( nAttrLen, sizeof( short ) );
-                nc_get_att_short( cdfid, var, szAttrName, psTemp );
-                for(m=0; m < nAttrLen-1; m++) {
-                    sprintf( szTemp, "%hd, ", psTemp[m] );
-                    SafeStrcat(&pszMetaTemp, szTemp, &nMetaTempSize);
-                }
-                sprintf( szTemp, "%hd", psTemp[m] );
-                SafeStrcat(&pszMetaTemp, szTemp, &nMetaTempSize);
-                CPLFree(psTemp);
-                break;
-            case NC_INT:
-                int *pnTemp;
-                pnTemp = (int *) CPLCalloc( nAttrLen, sizeof( int ) );
-                nc_get_att_int( cdfid, var, szAttrName, pnTemp );
-                for(m=0; m < nAttrLen-1; m++) {
-                    sprintf( szTemp, "%d, ", pnTemp[m] );
-                    SafeStrcat(&pszMetaTemp, szTemp, &nMetaTempSize);
-                }
-        	    sprintf( szTemp, "%d", pnTemp[m] );
-        	    SafeStrcat(&pszMetaTemp, szTemp, &nMetaTempSize);
-                CPLFree(pnTemp);
-                break;
-            case NC_FLOAT:
-                float *pfTemp;
-                pfTemp = (float *) CPLCalloc( nAttrLen, sizeof( float ) );
-                nc_get_att_float( cdfid, var, szAttrName, pfTemp );
-                for(m=0; m < nAttrLen-1; m++) {
-                    sprintf( szTemp, "%.7g, ", pfTemp[m] );
-                    SafeStrcat(&pszMetaTemp, szTemp, &nMetaTempSize);
-                }
-        	    sprintf( szTemp, "%.7g", pfTemp[m] );
-        	    SafeStrcat(&pszMetaTemp,szTemp, &nMetaTempSize);
-                CPLFree(pfTemp);
-                break;
-            case NC_DOUBLE:
-                double *pdfTemp;
-                pdfTemp = (double *) CPLCalloc(nAttrLen, sizeof(double));
-                nc_get_att_double( cdfid, var, szAttrName, pdfTemp );
-                for(m=0; m < nAttrLen-1; m++) {
-                    sprintf( szTemp, "%.15g, ", pdfTemp[m] );
-                    SafeStrcat(&pszMetaTemp, szTemp, &nMetaTempSize);
-                }
-        	    sprintf( szTemp, "%.15g", pdfTemp[m] );
-        	    SafeStrcat(&pszMetaTemp, szTemp, &nMetaTempSize);
-                CPLFree(pdfTemp);
-                break;
-            default:
-                break;
+
+        pszMetaTemp = NCDFGetAttr( cdfid, var, szAttrName );
+ 
+        if ( pszMetaTemp ) {
+            papszMetadata = CSLSetNameValue(papszMetadata, 
+                                            szMetaName, 
+                                            pszMetaTemp);
+            CPLFree(pszMetaTemp);
+            pszMetaTemp = NULL;
+        }
+        else {
+            CPLDebug( "GDAL_netCDF", "invalid global metadata %s", szMetaName );
         }
 
-        papszMetadata = CSLSetNameValue(papszMetadata, 
-                                        szMetaName, 
-                                        pszMetaTemp);
-        CPLFree(pszMetaTemp);
-    }
-	
+    }	
 
     return CE_None;
-
 }
 
 
@@ -2973,7 +2809,8 @@ GDALDataset *netCDFDataset::Open( GDALOpenInfo * poOpenInfo )
 /* -------------------------------------------------------------------- */
 /*      Read Metadata for this variable                                 */
 /* -------------------------------------------------------------------- */
-    poDS->ReadAttributes( cdfid, var );
+/* should disable as is now done at band level, except driver needs it */
+    poDS->ReadAttributes( cdfid, var ); 
 	
 /* -------------------------------------------------------------------- */
 /*      Read Metadata for each dimension                                */
@@ -3067,13 +2904,6 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
     int        nItems;
     int        bCopyItem;
 
-    /* These values for the detection of data type */
-    nc_type    nMetaType;
-    int        nMetaValue;
-    float      fMetaValue;
-    double     dfMetaValue;
-    char       *pszTemp;
-
     if( CDFVarID == NC_GLOBAL ) {
         papszMetadata = GDALGetMetadata( (GDALDataset *) poDS,"");
     } else {
@@ -3145,53 +2975,7 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
 
             if ( bCopyItem ) {
 
-                /* By default write NC_CHAR, but detect for int/float/double */
-                nMetaType = NC_CHAR;
-                nMetaValue = 0;
-                fMetaValue = 0.0f;
-                dfMetaValue = 0.0;
-
-                errno = 0;
-                nMetaValue = strtol( szMetaValue, &pszTemp, 10 );
-                if ( (errno == 0) && (szMetaValue != pszTemp) && (*pszTemp == 0) ) {
-                    nMetaType = NC_INT;
-                }
-                else {
-                    errno = 0;
-                    dfMetaValue = strtod( szMetaValue, &pszTemp );
-                    if ( (errno == 0) && (szMetaValue != pszTemp) && (*pszTemp == 0) ) {
-                        /* test for float instead of double */
-                        /* strtof() is C89, which is not available in MSVC */
-                        /* see if we loose precision if we cast to float and write to char* */
-                        fMetaValue = (float)dfMetaValue; 
-                        sprintf( szTemp,"%.7g",fMetaValue); 
-                        if ( EQUAL(szTemp, szMetaValue ) )
-                            nMetaType = NC_FLOAT;
-                        else
-                            nMetaType = NC_DOUBLE;                   
-                    }
-                }
-
-                /* now write the data */
-                switch( nMetaType ) {
-                    case  NC_INT:
-                        nc_put_att_int( fpImage, CDFVarID, szMetaName,
-                                        NC_INT, 1, &nMetaValue );
-                        break;
-                    case  NC_FLOAT:
-                        nc_put_att_float( fpImage, CDFVarID, szMetaName,
-                                          NC_FLOAT, 1, &fMetaValue );
-                        break;
-                    case  NC_DOUBLE:
-                        nc_put_att_double( fpImage, CDFVarID,  szMetaName,
-                                           NC_DOUBLE, 1, &dfMetaValue );
-                        break;
-                    default:
-                        nc_put_att_text( fpImage, CDFVarID, szMetaName,
-                                         strlen( szMetaValue ),
-                                         szMetaValue );          
-                        break;
-                }
+                NCDFPutAttr( fpImage, CDFVarID,szMetaName, szMetaValue );
             }
             
         }
@@ -4139,7 +3923,6 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                                                      "IMAGE_STRUCTURE");
             if ( tmpMetadata && EQUAL(tmpMetadata,"SIGNEDBYTE") ) {
                 nSignedByte = TRUE;
-                printf("TMP ET got SIGNEDBYTE\n");
             }
             else {
                 /* No unsigned byte datatype in pre NC4, and NC4-Classic 
@@ -4862,4 +4645,255 @@ void NCDFWriteProjAttribs( const OGR_SRSNode *poPROJCS,
                                NC_DOUBLE, 2, dfStdP );
         }
     }
+}
+
+
+CPLErr NCDFSafeStrcat(char** ppszDest, char* pszSrc, size_t* nDestSize)
+{
+    /* Reallocate the data string until the content fits */
+    while(*nDestSize < (strlen(*ppszDest) + strlen(pszSrc) + 1)) {
+        (*nDestSize) *= 2;
+        *ppszDest = (char*) CPLRealloc((void*) *ppszDest, *nDestSize);
+    }
+    strcat(*ppszDest, pszSrc);
+    
+    return CE_None;
+}
+
+/* given args fills szValue with attribute values */
+/* pszMetaTemp is the responsibility of the caller and must be freed */
+char * NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName, 
+                    double *padfValue, int *panAttrLen )
+{
+    nc_type nAttrType = NC_NAT;
+    size_t  nAttrLen = 0;
+    size_t  nAttrValueSize;
+    int     status = 0; /*rename this */
+    size_t  m;
+    char    szTemp[ NCDF_MAX_STR_LEN ];
+    char *pszAttrValue = NULL;
+    
+    status = nc_inq_att( nCdfId, nVarId, pszAttrName, &nAttrType, &nAttrLen);
+    if ( status != NC_NOERR )
+        return NULL;
+
+    /* Allocate guaranteed minimum size */
+    nAttrValueSize = nAttrLen + 1;
+    if ( pszAttrValue != NULL ) {
+        CPLFree( pszAttrValue );
+        pszAttrValue = NULL;
+    }
+    pszAttrValue = (char *) CPLCalloc( nAttrValueSize, sizeof( char ));
+    *pszAttrValue = '\0';
+
+    if ( nAttrLen > 1  && nAttrType != NC_CHAR )    
+        NCDFSafeStrcat(&pszAttrValue, (char *)"{ ", &nAttrValueSize);
+
+    if ( nAttrLen > 0 && nAttrType != NC_CHAR && panAttrLen )
+        *panAttrLen = nAttrLen;
+
+    switch (nAttrType) {
+        case NC_CHAR:
+            nc_get_att_text( nCdfId, nVarId, pszAttrName, pszAttrValue );
+            pszAttrValue[nAttrLen]='\0';
+            if ( padfValue ) *padfValue = 0.0;
+            if ( panAttrLen ) *panAttrLen = 1;
+            break;
+        /* TODO support NC_UBYTE */
+        case NC_BYTE:
+            signed char *pscTemp;
+            pscTemp = (signed char *) CPLCalloc( nAttrLen, sizeof( signed char ) );
+            nc_get_att_schar( nCdfId, nVarId, pszAttrName, pscTemp );
+            if ( padfValue ) *padfValue = (double)pscTemp[0];
+            for(m=0; m < nAttrLen-1; m++) {
+                sprintf( szTemp, "%d, ", pscTemp[m] );
+                NCDFSafeStrcat(&pszAttrValue, szTemp, &nAttrValueSize);
+            }
+            sprintf( szTemp, "%d", pscTemp[m] );
+            NCDFSafeStrcat(&pszAttrValue, szTemp, &nAttrValueSize);
+            CPLFree(pscTemp);
+            break;
+        case NC_SHORT:
+            short *psTemp;
+            psTemp = (short *) CPLCalloc( nAttrLen, sizeof( short ) );
+            nc_get_att_short( nCdfId, nVarId, pszAttrName, psTemp );
+            if ( padfValue ) *padfValue = (double)psTemp[0];
+            for(m=0; m < nAttrLen-1; m++) {
+                sprintf( szTemp, "%hd, ", psTemp[m] );
+                NCDFSafeStrcat(&pszAttrValue, szTemp, &nAttrValueSize);
+            }
+            sprintf( szTemp, "%hd", psTemp[m] );
+            NCDFSafeStrcat(&pszAttrValue, szTemp, &nAttrValueSize);
+            CPLFree(psTemp);
+            break;
+        case NC_INT:
+            int *pnTemp;
+            pnTemp = (int *) CPLCalloc( nAttrLen, sizeof( int ) );
+            nc_get_att_int( nCdfId, nVarId, pszAttrName, pnTemp );
+            if ( padfValue ) *padfValue = (double)pnTemp[0];
+            for(m=0; m < nAttrLen-1; m++) {
+                sprintf( szTemp, "%d, ", pnTemp[m] );
+                NCDFSafeStrcat(&pszAttrValue, szTemp, &nAttrValueSize);
+            }
+            sprintf( szTemp, "%d", pnTemp[m] );
+            NCDFSafeStrcat(&pszAttrValue, szTemp, &nAttrValueSize);
+            CPLFree(pnTemp);
+            break;
+        case NC_FLOAT:
+            float *pfTemp;
+            pfTemp = (float *) CPLCalloc( nAttrLen, sizeof( float ) );
+            nc_get_att_float( nCdfId, nVarId, pszAttrName, pfTemp );
+            if ( padfValue ) *padfValue = (double)pfTemp[0];
+            for(m=0; m < nAttrLen-1; m++) {
+                sprintf( szTemp, "%.7g, ", pfTemp[m] );
+                NCDFSafeStrcat(&pszAttrValue, szTemp, &nAttrValueSize);
+            }
+            sprintf( szTemp, "%.7g", pfTemp[m] );
+            NCDFSafeStrcat(&pszAttrValue,szTemp, &nAttrValueSize);
+            CPLFree(pfTemp);
+            break;
+        case NC_DOUBLE:
+            double *pdfTemp;
+            pdfTemp = (double *) CPLCalloc(nAttrLen, sizeof(double));
+            nc_get_att_double( nCdfId, nVarId, pszAttrName, pdfTemp );
+            if ( padfValue ) *padfValue = pdfTemp[0];
+            for(m=0; m < nAttrLen-1; m++) {
+                sprintf( szTemp, "%.15g, ", pdfTemp[m] );
+                NCDFSafeStrcat(&pszAttrValue, szTemp, &nAttrValueSize);
+            }
+            sprintf( szTemp, "%.15g", pdfTemp[m] );
+            NCDFSafeStrcat(&pszAttrValue, szTemp, &nAttrValueSize);
+            CPLFree(pdfTemp);
+            break;
+        default:
+            CPLDebug( "GDAL_netCDF", "NCDFGetAttr unsupported type %d for attribute %s",
+                      nAttrType,pszAttrName);
+            CPLFree( pszAttrValue );
+            pszAttrValue = NULL;
+            break;
+    }
+
+    if ( nAttrLen > 1  && nAttrType!= NC_CHAR )    
+        NCDFSafeStrcat(&pszAttrValue, (char *)" }", &nAttrValueSize);
+
+    // CPLDebug( "GDAL_netCDF", "NCDFGetAttr got %s=%s",
+    //           pszAttrName,pszAttrValue);
+
+    return pszAttrValue;    
+}
+
+
+/* By default write NC_CHAR, but detect for int/float/double */
+int NCDFPutAttr( int nCdfId, int nVarId, 
+                 const char *pszAttrName, const char *pszValue )
+{
+    nc_type nAttrType = NC_CHAR;
+    nc_type nTmpAttrType = NC_CHAR;
+    size_t  nAttrLen = 0;
+    int     status = 0;
+    size_t  i;
+    char    szTemp[ NCDF_MAX_STR_LEN ];
+    char    *pszTemp = NULL;
+    char    **papszValues = NULL;
+    
+    int     bIsArray = FALSE;
+    int     nValue = 0;
+    float   fValue = 0.0f;
+    double  dfValue = 0.0;
+
+    if ( EQUAL( pszValue, "" ) )
+        return 1;
+
+    strcpy( szTemp,pszValue );
+
+    /* tokenize to find multiple values */
+    int last_char = strlen(pszValue) - 1;
+    if ( ( szTemp[0] == '{' ) && ( szTemp[last_char] == '}' ) ) {
+        bIsArray = TRUE;
+        szTemp[0] = ' '; 
+        szTemp[last_char] = ' ';
+    }
+    papszValues = CSLTokenizeString2( szTemp, ",", CSLT_STRIPLEADSPACES |
+                                      CSLT_STRIPENDSPACES );
+    if ( papszValues == NULL )
+        return 1;
+
+    nAttrLen = CSLCount(papszValues);
+    
+    /* first detect type */
+    nAttrType = NC_CHAR;
+    for ( i=0; i<nAttrLen; i++ ) {
+        nTmpAttrType = NC_CHAR;
+        errno = 0;
+        nValue = strtol( papszValues[i], &pszTemp, 10 );
+        /* test for int */
+        /* TODO test for Byte and short - can this be done safely? */
+        if ( (errno == 0) && (papszValues[i] != pszTemp) && (*pszTemp == 0) ) {
+            nTmpAttrType = NC_INT;
+        }
+        else {
+            /* test for double */
+            errno = 0;
+            dfValue = strtod( papszValues[i], &pszTemp );
+            if ( (errno == 0) && (papszValues[i] != pszTemp) && (*pszTemp == 0) ) {
+                /* test for float instead of double */
+                /* strtof() is C89, which is not available in MSVC */
+                /* see if we loose precision if we cast to float and write to char* */
+                fValue = (float)dfValue; 
+                sprintf( szTemp,"%.7g",fValue); 
+                if ( EQUAL(szTemp, papszValues[i] ) )
+                    nTmpAttrType = NC_FLOAT;
+                else
+                    nTmpAttrType = NC_DOUBLE;                   
+            }
+        }
+        if ( nTmpAttrType > nAttrType )
+            nAttrType = nTmpAttrType;
+    }
+
+    /* now write the data */
+    if ( !bIsArray && nAttrType == NC_CHAR ) {
+        nc_put_att_text( nCdfId, nVarId, pszAttrName,
+                         strlen( pszValue ), pszValue );               
+    }
+    else {
+        
+        switch( nAttrType ) {
+            case  NC_INT:
+                int *pnTemp;
+                pnTemp = (int *) CPLCalloc( nAttrLen, sizeof( int ) );
+                for(i=0; i < nAttrLen; i++) {
+                    pnTemp[i] = strtol( papszValues[i], &pszTemp, 10 );
+                }
+                status = nc_put_att_int( nCdfId, nVarId, pszAttrName, 
+                                         NC_INT, nAttrLen, pnTemp );  
+                CPLFree(pnTemp);
+            break;
+            case  NC_FLOAT:
+                float *pfTemp;
+                pfTemp = (float *) CPLCalloc( nAttrLen, sizeof( float ) );
+                for(i=0; i < nAttrLen; i++) {
+                    pfTemp[i] = (float)strtod( papszValues[i], &pszTemp );
+                }
+                status = nc_put_att_float( nCdfId, nVarId, pszAttrName, 
+                                           NC_FLOAT, nAttrLen, pfTemp );  
+                CPLFree(pfTemp);
+            break;
+            case  NC_DOUBLE:
+                double *pdfTemp;
+                pdfTemp = (double *) CPLCalloc( nAttrLen, sizeof( double ) );
+                for(i=0; i < nAttrLen; i++) {
+                    pdfTemp[i] = strtod( papszValues[i], &pszTemp );
+                }
+                status = nc_put_att_double( nCdfId, nVarId, pszAttrName, 
+                                            NC_DOUBLE, nAttrLen, pdfTemp );  
+                CPLFree(pdfTemp);
+            break;
+        default:
+            return 1;
+            break;
+        }   
+    }
+
+    return 0;
 }
