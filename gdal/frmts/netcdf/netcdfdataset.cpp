@@ -49,10 +49,12 @@ void NCDFWriteProjAttribs(const OGR_SRSNode *poPROJCS,
 
 CPLErr NCDFSafeStrcat(char** ppszDest, char* pszSrc, size_t* nDestSize);
 
-char * NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName, 
-                    double *padfValue=NULL, int *panAttrLen=NULL );
+CPLErr NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName, 
+                    double *pdfValue );
+CPLErr NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName, 
+                    char **pszValue );
 
-int NCDFPutAttr( int nCdfId, int nVarId, 
+CPLErr NCDFPutAttr( int nCdfId, int nVarId, 
                  const char *pszAttrName, const char *pszValue );
 
 /************************************************************************/
@@ -243,8 +245,9 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
     if( status == NC_NOERR ) {
 
         if ( NCDFGetAttr( poDS->cdfid, nZId, szNoValueName, 
-                          &dfNoData) != NULL )
+                          &dfNoData ) == CE_None ) {
             bNoDataSet = TRUE;
+        }
 
     }
     /* if not found NoData, set the default one */
@@ -322,7 +325,7 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
         }
     }
 
-    CPLDebug( "GDAL_netCDF", "got valid_range={%f,%f}",
+    CPLDebug( "GDAL_netCDF", "valid_range={%f,%f}",
               adfValidRange[0], adfValidRange[1] );
 
 /* -------------------------------------------------------------------- */
@@ -363,19 +366,14 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poDS,
             /* else test for _Unsigned */
             /* http://www.unidata.ucar.edu/software/netcdf/docs/BestPractices.html */
             else {
-                status = nc_inq_att( poDS->cdfid, nZId, 
-                                     "_Unsigned", &atttype, &attlen);
-                if( status == NC_NOERR ) {
-                    char *pszTemp;
-                    pszTemp = (char *) CPLCalloc( attlen+1, sizeof(char) );
-                    status = nc_get_att_text( poDS->cdfid, nZId, 
-                                              "_Unsigned", pszTemp );
-                    if( status == NC_NOERR ) {
-                        if ( EQUAL(pszTemp,"true"))
-                            bSignedData = FALSE;
-                        else if ( EQUAL(pszTemp,"false"))
-                            bSignedData = TRUE;
-                    }
+                char *pszTemp = NULL;
+                if ( NCDFGetAttr( poDS->cdfid, nZId, "_Unsigned", &pszTemp ) 
+                     == CE_None ) {
+                    if ( EQUAL(pszTemp,"true"))
+                        bSignedData = FALSE;
+                    else if ( EQUAL(pszTemp,"false"))
+                        bSignedData = TRUE;
+                    CPLFree( pszTemp );
                 }
             }
         }
@@ -678,10 +676,8 @@ CPLErr netCDFRasterBand::CreateBandMetadata( )
     	// if(strcmp(szTemp,_FillValue) ==0) continue;
     	sprintf( szMetaName,"%s",szTemp);       
 
-        pszMetaValue = NCDFGetAttr( poDS->cdfid, nZId, szMetaName);
-        if ( pszMetaValue ) {
-            // CPLDebug( "GDAL_netCDF", "setting metadata %s=%s", 
-            //           szMetaName, pszMetaValue );
+        if ( NCDFGetAttr( poDS->cdfid, nZId, szMetaName, &pszMetaValue) 
+             == CE_None ) {
             SetMetadataItem( szMetaName, pszMetaValue );
         }
         else {
@@ -748,7 +744,6 @@ CPLErr netCDFRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
     int    Sum=-1;
     int    Taken=-1;
     int    nd;
-    int    bCheckValidRange = FALSE; /*TMP ET remove */
 
     *pszName='\0';
     memset( start, 0, sizeof( start ) );
@@ -804,11 +799,6 @@ CPLErr netCDFRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
             Taken += start[panBandZPos[i]] * Sum;
         }
     }
-
-
-    if (  (adfValidRange[0] != dfNoDataValue) || 
-          (adfValidRange[1] != dfNoDataValue) ) 
-        bCheckValidRange = TRUE;
 
     if( eDataType == GDT_Byte ) {
         if (this->bSignedData) {
@@ -2254,9 +2244,8 @@ CPLErr netCDFDataset::ReadAttributes( int cdfid, int var)
         nc_inq_attname( cdfid, var, l, szAttrName);
         sprintf( szMetaName, "%s#%s", szVarName, szAttrName  );
 
-        pszMetaTemp = NCDFGetAttr( cdfid, var, szAttrName );
- 
-        if ( pszMetaTemp ) {
+        if ( NCDFGetAttr( cdfid, var, szAttrName, &pszMetaTemp )
+             == CE_None ) {
             papszMetadata = CSLSetNameValue(papszMetadata, 
                                             szMetaName, 
                                             pszMetaTemp);
@@ -2974,8 +2963,11 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
             }
 
             if ( bCopyItem ) {
+                if ( NCDFPutAttr( fpImage, CDFVarID,szMetaName, 
+                                  szMetaValue ) != CE_None )
+                    CPLDebug( "GDAL_netCDF", "NCDFPutAttr(%d, %d, %s, %s) failed", 
+                              fpImage, CDFVarID,szMetaName, szMetaValue );
 
-                NCDFPutAttr( fpImage, CDFVarID,szMetaName, szMetaValue );
             }
             
         }
@@ -4660,10 +4652,12 @@ CPLErr NCDFSafeStrcat(char** ppszDest, char* pszSrc, size_t* nDestSize)
     return CE_None;
 }
 
-/* given args fills szValue with attribute values */
-/* pszMetaTemp is the responsibility of the caller and must be freed */
-char * NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName, 
-                    double *padfValue, int *panAttrLen )
+/* helper function for NCDFGetAttr() */
+/* sets pdfValue to first value returned */
+/* and if bSetPszValue=True sets szValue with all values attribute values */
+/* pszValue is the responsibility of the caller and must be freed */
+CPLErr NCDFGetAttr1( int nCdfId, int nVarId, const char *pszAttrName, 
+                     double *pdfValue, char **pszValue, int bSetPszValue )
 {
     nc_type nAttrType = NC_NAT;
     size_t  nAttrLen = 0;
@@ -4671,40 +4665,33 @@ char * NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName,
     int     status = 0; /*rename this */
     size_t  m;
     char    szTemp[ NCDF_MAX_STR_LEN ];
-    char *pszAttrValue = NULL;
-    
+    char    *pszAttrValue = NULL;
+    double  dfValue = 0.0;
+
     status = nc_inq_att( nCdfId, nVarId, pszAttrName, &nAttrType, &nAttrLen);
     if ( status != NC_NOERR )
-        return NULL;
+        return CE_Failure;
 
     /* Allocate guaranteed minimum size */
     nAttrValueSize = nAttrLen + 1;
-    if ( pszAttrValue != NULL ) {
-        CPLFree( pszAttrValue );
-        pszAttrValue = NULL;
-    }
     pszAttrValue = (char *) CPLCalloc( nAttrValueSize, sizeof( char ));
     *pszAttrValue = '\0';
 
     if ( nAttrLen > 1  && nAttrType != NC_CHAR )    
         NCDFSafeStrcat(&pszAttrValue, (char *)"{ ", &nAttrValueSize);
 
-    if ( nAttrLen > 0 && nAttrType != NC_CHAR && panAttrLen )
-        *panAttrLen = nAttrLen;
-
     switch (nAttrType) {
         case NC_CHAR:
             nc_get_att_text( nCdfId, nVarId, pszAttrName, pszAttrValue );
             pszAttrValue[nAttrLen]='\0';
-            if ( padfValue ) *padfValue = 0.0;
-            if ( panAttrLen ) *panAttrLen = 1;
+            dfValue = 0.0;
             break;
         /* TODO support NC_UBYTE */
         case NC_BYTE:
             signed char *pscTemp;
             pscTemp = (signed char *) CPLCalloc( nAttrLen, sizeof( signed char ) );
             nc_get_att_schar( nCdfId, nVarId, pszAttrName, pscTemp );
-            if ( padfValue ) *padfValue = (double)pscTemp[0];
+            dfValue = (double)pscTemp[0];
             for(m=0; m < nAttrLen-1; m++) {
                 sprintf( szTemp, "%d, ", pscTemp[m] );
                 NCDFSafeStrcat(&pszAttrValue, szTemp, &nAttrValueSize);
@@ -4717,7 +4704,7 @@ char * NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName,
             short *psTemp;
             psTemp = (short *) CPLCalloc( nAttrLen, sizeof( short ) );
             nc_get_att_short( nCdfId, nVarId, pszAttrName, psTemp );
-            if ( padfValue ) *padfValue = (double)psTemp[0];
+            dfValue = (double)psTemp[0];
             for(m=0; m < nAttrLen-1; m++) {
                 sprintf( szTemp, "%hd, ", psTemp[m] );
                 NCDFSafeStrcat(&pszAttrValue, szTemp, &nAttrValueSize);
@@ -4730,7 +4717,7 @@ char * NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName,
             int *pnTemp;
             pnTemp = (int *) CPLCalloc( nAttrLen, sizeof( int ) );
             nc_get_att_int( nCdfId, nVarId, pszAttrName, pnTemp );
-            if ( padfValue ) *padfValue = (double)pnTemp[0];
+            dfValue = (double)pnTemp[0];
             for(m=0; m < nAttrLen-1; m++) {
                 sprintf( szTemp, "%d, ", pnTemp[m] );
                 NCDFSafeStrcat(&pszAttrValue, szTemp, &nAttrValueSize);
@@ -4743,7 +4730,7 @@ char * NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName,
             float *pfTemp;
             pfTemp = (float *) CPLCalloc( nAttrLen, sizeof( float ) );
             nc_get_att_float( nCdfId, nVarId, pszAttrName, pfTemp );
-            if ( padfValue ) *padfValue = (double)pfTemp[0];
+            dfValue = (double)pfTemp[0];
             for(m=0; m < nAttrLen-1; m++) {
                 sprintf( szTemp, "%.7g, ", pfTemp[m] );
                 NCDFSafeStrcat(&pszAttrValue, szTemp, &nAttrValueSize);
@@ -4756,7 +4743,7 @@ char * NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName,
             double *pdfTemp;
             pdfTemp = (double *) CPLCalloc(nAttrLen, sizeof(double));
             nc_get_att_double( nCdfId, nVarId, pszAttrName, pdfTemp );
-            if ( padfValue ) *padfValue = pdfTemp[0];
+            dfValue = pdfTemp[0];
             for(m=0; m < nAttrLen-1; m++) {
                 sprintf( szTemp, "%.15g, ", pdfTemp[m] );
                 NCDFSafeStrcat(&pszAttrValue, szTemp, &nAttrValueSize);
@@ -4776,15 +4763,35 @@ char * NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName,
     if ( nAttrLen > 1  && nAttrType!= NC_CHAR )    
         NCDFSafeStrcat(&pszAttrValue, (char *)" }", &nAttrValueSize);
 
-    // CPLDebug( "GDAL_netCDF", "NCDFGetAttr got %s=%s",
-    //           pszAttrName,pszAttrValue);
+    // CPLDebug( "GDAL_netCDF", "NCDFGetAttr got %s=%s / %f",
+    //           pszAttrName,pszAttrValue,dfValue);
 
-    return pszAttrValue;    
+    /* set return values */
+    if ( bSetPszValue == TRUE ) *pszValue = pszAttrValue;
+    else CPLFree ( pszAttrValue );
+    if ( pdfValue ) *pdfValue = dfValue;
+
+    return CE_None;
+}
+
+
+/* sets pdfValue to first value found */
+CPLErr NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName, 
+                    double *pdfValue )
+{
+    return NCDFGetAttr1( nCdfId, nVarId, pszAttrName, pdfValue, NULL, FALSE );
+}
+
+/* pszValue is the responsibility of the caller and must be freed */
+CPLErr NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName, 
+                    char **pszValue )
+{
+    return NCDFGetAttr1( nCdfId, nVarId, pszAttrName, FALSE, pszValue, TRUE );
 }
 
 
 /* By default write NC_CHAR, but detect for int/float/double */
-int NCDFPutAttr( int nCdfId, int nVarId, 
+CPLErr NCDFPutAttr( int nCdfId, int nVarId, 
                  const char *pszAttrName, const char *pszValue )
 {
     nc_type nAttrType = NC_CHAR;
@@ -4802,7 +4809,7 @@ int NCDFPutAttr( int nCdfId, int nVarId,
     double  dfValue = 0.0;
 
     if ( EQUAL( pszValue, "" ) )
-        return 1;
+        return CE_Failure;
 
     strcpy( szTemp,pszValue );
 
@@ -4816,7 +4823,7 @@ int NCDFPutAttr( int nCdfId, int nVarId,
     papszValues = CSLTokenizeString2( szTemp, ",", CSLT_STRIPLEADSPACES |
                                       CSLT_STRIPENDSPACES );
     if ( papszValues == NULL )
-        return 1;
+        return CE_Failure;
 
     nAttrLen = CSLCount(papszValues);
     
@@ -4890,10 +4897,13 @@ int NCDFPutAttr( int nCdfId, int nVarId,
                 CPLFree(pdfTemp);
             break;
         default:
-            return 1;
+            if ( papszValues ) CSLDestroy( papszValues );
+            return CE_Failure;
             break;
         }   
     }
 
-    return 0;
+    if ( papszValues ) CSLDestroy( papszValues );
+
+     return CE_None;
 }
