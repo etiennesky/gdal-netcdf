@@ -86,7 +86,12 @@
 /* helper for libnetcdf errors */
 #define NCDF_ERR(status) if ( status != NC_NOERR ){ \
 CPLError( CE_Failure,CPLE_AppDefined, \
-"netcdf error #%d : %s .\n",status, nc_strerror(status) ); }
+"netcdf error #%d : %s .\nat (%s,%s,%d)\n",status, nc_strerror(status), \
+__FILE__, __FUNCTION__, __LINE__ ); }
+/* #define NCDF_ERR(status) if ( status != NC_NOERR ){ \ */
+/* CPLError( CE_Failure,CPLE_AppDefined, \ */
+/* "netcdf error #%d : %s .\n",status, nc_strerror(status)); } */
+
 /* void NCDFErr(int status)  { if ( status != NC_NOERR ) {  */
 /*      CPLError( CE_Failure, CPLE_AppDefined,  */
 /*                "netcdf error #%d : %s .\n",  */

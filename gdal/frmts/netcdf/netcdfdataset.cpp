@@ -127,6 +127,8 @@ class netCDFRasterBand : public GDALPamRasterBand
     virtual double GetScale( int * );
     virtual CPLErr SetScale( double );
     virtual CPLErr IReadBlock( int, int, void * );
+    // virtual CPLErr IWriteBlock( int, int, void * );
+    // virtual CPLErr FlushCache( void ); //???
 
 };
 
@@ -422,6 +424,7 @@ netCDFRasterBand::~netCDFRasterBand()
         CPLFree( panBandZPos );
     if( panBandZLev )
         CPLFree( panBandZLev );
+    // FlushCache(); //??
 }
 
 /************************************************************************/ 
@@ -853,6 +856,7 @@ CPLErr netCDFRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
     else 
         return CE_None;
 }
+
 
 /************************************************************************/
 /* ==================================================================== */
@@ -2950,16 +2954,24 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
                 /* Don't copy band statistics */
                 else if ( strncmp( szMetaName, "STATISTICS_", 11) == 0 ) 
                     bCopyItem = FALSE;
-                /* Remove add_offset, scale_factor, valid_range and _Unsigned */
+                /* Remove the following variables */
                 /* but set them later from band data */
-                else if ( strcmp( szMetaName, CF_ADD_OFFSET ) == 0 ) 
+                const char *papszIgnore[] = { CF_ADD_OFFSET, CF_SCALE_FACTOR, 
+                                        "valid_range", "_Unsigned", 
+                                        _FillValue, NULL };
+                if ( CSLFindString( (char **)papszIgnore, szMetaName ) != -1 ) {
                     bCopyItem = FALSE;
-                else if ( strcmp( szMetaName, CF_SCALE_FACTOR ) == 0 ) 
-                    bCopyItem = FALSE;
-                else if ( strcmp( szMetaName, "valid_range" ) == 0 ) 
-                    bCopyItem = FALSE;
-                else if ( strcmp( szMetaName, "_Unsigned" ) == 0 ) 
-                    bCopyItem = FALSE;
+                }
+                // else if ( strcmp( szMetaName, CF_ADD_OFFSET ) == 0 ) 
+                //     bCopyItem = FALSE;
+                // else if ( strcmp( szMetaName, CF_SCALE_FACTOR ) == 0 ) 
+                //     bCopyItem = FALSE;
+                // else if ( strcmp( szMetaName, "valid_range" ) == 0 ) 
+                //     bCopyItem = FALSE;
+                // else if ( strcmp( szMetaName, "_Unsigned" ) == 0 ) 
+                //     bCopyItem = FALSE;
+                // else if ( strcmp( szMetaName, _FillValue ) == 0 ) 
+                //     bCopyItem = FALSE;
             }
 
             if ( bCopyItem ) {
@@ -2977,15 +2989,17 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID ) {
     /* Set add_offset and scale_factor here if present */
     if( CDFVarID != NC_GLOBAL ) {
 
-        int bGotAddOffset, bGotScale;
+        int bGotAddOffset, bGotScale, status;
         double dfAddOffset = GDALGetRasterOffset( (GDALRasterBandH) poDS, &bGotAddOffset );
         double dfScale = GDALGetRasterScale( (GDALRasterBandH) poDS, &bGotScale );
 
         if ( bGotAddOffset && dfAddOffset != 0.0 && bGotScale && dfScale != 1.0 ) {
-            nc_put_att_double( fpImage, CDFVarID, CF_ADD_OFFSET,
+            status = nc_put_att_double( fpImage, CDFVarID, CF_ADD_OFFSET,
                                NC_DOUBLE, 1, &dfAddOffset );
-            nc_put_att_double( fpImage, CDFVarID, CF_SCALE_FACTOR,
+            NCDF_ERR(status);
+            status = nc_put_att_double( fpImage, CDFVarID, CF_SCALE_FACTOR,
                                NC_DOUBLE, 1, &dfScale );
+            NCDF_ERR(status);
         }
 
     }
@@ -3022,63 +3036,223 @@ Processing steps:
 7 write pam 
 */
 
-static GDALDataset*
-NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS, 
-                int bStrict, char ** papszOptions, 
-                GDALProgressFunc pfnProgress, void * pProgressData )
-
+class NCDFCreateHelper
 {
-    CPLErr eErr = CE_None;
+    CPLErr eErr;
    
-    int  nBands = poSrcDS->GetRasterCount();
-    int  nXSize = poSrcDS->GetRasterXSize();
-    int  nYSize = poSrcDS->GetRasterYSize();
-    int  nLonSize=0, nLatSize=0; 
+    int  nBands;
+    int  nXSize;
+    int  nYSize;
+    int  nLonSize;
+    int  nLatSize;
     int  iBand;
     GDALDataType eDT;
 
     int  anBandDims[ NC_MAX_DIMS ];
     // int  anBandMap[  NC_MAX_DIMS ];
 
-    int  bBottomUp = FALSE;
-    int  bWriteGridMapping = FALSE;
-    int  bWriteLonLat = FALSE;
-    int  bWriteGdalTags = FALSE;
-    char pszNetcdfProjection[ NC_MAX_NAME ];
+    int  bBottomUp;
+    int  bWriteGridMapping;
+    int  bWriteLonLat;
+    int  bWriteGdalTags;
+    char szNetcdfProjection[ NC_MAX_NAME ];
 
     const char *pszValue;
     char   szTemp[ NCDF_MAX_STR_LEN ];
 
     /* Variables needed for projection */
-    int NCDFVarID=0;
+    int NCDFVarID;
  
     double adfGeoTransform[6];
     char   szGeoTransform[ NCDF_MAX_STR_LEN ];
-    int bSourceHasGeoTransform = TRUE;
+    int bSourceHasGeoTransform;
 
-
-    const char *pszLonDimName = NCDF_DIMNAME_LON;
-    const char *pszLatDimName = NCDF_DIMNAME_LAT;
-    nc_type eLonLatType = NC_DOUBLE;
-    double *padLonVal = NULL;
-    double *padLatVal = NULL; /* should use float for projected, save space */
-    double dfX0=0.0, dfDX=0.0, dfY0=0.0, dfDY=0.0;
-    double dfTemp=0.0;
-    size_t *startLon = NULL;
-    size_t *countLon = NULL;
-    size_t *startLat = NULL;
-    size_t *countLat = NULL;
+    const char *pszLonDimName;
+    const char *pszLatDimName;
+    nc_type eLonLatType;
+    double *padLonVal;
+    double *padLatVal; /* should use float for projected, save space */
+    double dfTemp;
+    size_t *startLon;
+    size_t *countLon;
+    size_t *startLat;
+    size_t *countLat;
 
     OGRSpatialReference oSRS;
-    char *pszWKT = NULL;
+    char *pszWKT;
+    
+    int nFormat;
+    int nCompress;
+    int nZLevel; 
+    int nCreateMode;
 
-    int nFormat = NCDF_FORMAT_UNKNOWN;
-    int nCompress = NCDF_COMPRESS_NONE;
-    int nZLevel = NCDF_DEFLATE_LEVEL;
-    int nCreateMode = NC_CLOBBER;
+    int fpImage;
+    int status;
+    int nXDimID;
+    int nYDimID;
+    int nLonDimID;
+    int nLatDimID;
+
+    /* new vars */
+    int bIsProjected;
+    int bIsGeographic;
+    int *panNCDFVarID;
+    
+
+public:
+
+    NCDFCreateHelper();
+    ~NCDFCreateHelper();  
+
+    GDALDataset *Create( const char * pszFilename,
+                         int nXSize, int nYSize, int nBands,
+                         GDALDataType eType,
+                         char ** papszOptions );
+    GDALDataset *CreateCopy( const char * pszFilename, GDALDataset *poSrcDS, 
+                             int bStrict, char ** papszOptions, 
+                             GDALProgressFunc pfnProgress, void * pProgressData );
+
+    void ProcessOptions( char ** papszOptions );
+    void DefineDims( GDALDataset *poSrcDS );
+    void WriteDims( GDALDataset *poSrcDS, 
+                    GDALProgressFunc pfnProgress, void *pProgressData );
+    // void CopyBands( GDALDataset *poSrcDS, 
+    //                 GDALProgressFunc pfnProgress, void *pProgressData );
+    void DefineBands( GDALDataset *poSrcDS );
+    void CopyBandData( GDALDataset *poSrcDS, 
+                       GDALProgressFunc pfnProgress, void *pProgressData );
+    void DefVarDeflate( int nVarId, int bChunking = TRUE );
+
+};
+
+/*default values, should they be set in Create/CreateCopy() ? */
+NCDFCreateHelper::NCDFCreateHelper()
+{
+    eErr = CE_None;
+   
+    nLonSize=0, nLatSize=0; 
+
+    bBottomUp = FALSE;
+    bWriteGridMapping = FALSE;
+    bWriteLonLat = FALSE;
+    bWriteGdalTags = FALSE;
+
+    /* Variables needed for projection */
+    NCDFVarID=0;
+ 
+    bSourceHasGeoTransform = TRUE;
+
+    pszLonDimName = NCDF_DIMNAME_LON;
+    pszLatDimName = NCDF_DIMNAME_LAT;
+    eLonLatType = NC_DOUBLE;
+    padLonVal = NULL;
+    padLatVal = NULL; /* should use float for projected, save space */
+    dfTemp=0.0;
+    startLon = NULL;
+    countLon = NULL;
+    startLat = NULL;
+    countLat = NULL;
+
+    pszWKT = NULL;
+
+    nFormat = NCDF_FORMAT_UNKNOWN;
+    nCompress = NCDF_COMPRESS_NONE;
+    nZLevel = NCDF_DEFLATE_LEVEL;
+    nCreateMode = NC_CLOBBER;
+
+    nXDimID = 0;
+    nYDimID = 0;
+    nLonDimID = 0;
+    nLatDimID = 0;
+
+    /* new vars */
+    bIsProjected = FALSE;
+    bIsGeographic = FALSE; /* can be not projected, and also not geographic */
+    panNCDFVarID = NULL; /*needed to keep track of band netcdfids */
+
+    /*new defs */
+    szNetcdfProjection[0]='\0';//renamed also
+    szTemp[0]='\0';
+    szGeoTransform[0]='\0';
+
+}
+
+NCDFCreateHelper::~NCDFCreateHelper()
+{
+    /* perhaps we will need to free some values with Create() */
+    if ( panNCDFVarID ) CPLFree( panNCDFVarID );
+}
+
+
+static GDALDataset *
+NCDFCreate( const char * pszFilename,
+            int nXSize, int nYSize, int nBands,
+            GDALDataType eType,
+            char ** papszParmList  )
+
+{
+    NCDFCreateHelper *poCreateHelper = new NCDFCreateHelper();
+    GDALDataset *poDataset =  poCreateHelper->Create( pszFilename,
+                                                      nXSize, nYSize, nBands,
+                                                      eType, papszParmList );
+    CPLFree( poCreateHelper );
+    return poDataset;
+
+    /*  the helper should kept in NCDFDataset for future use */
+}
+
+GDALDataset *
+NCDFCreateHelper::Create( const char * pszFilename,
+                          int nXSize, int nYSize, int nBands,
+                          GDALDataType eType,
+                          char ** papszOptions )
+{
+    this->nBands = nBands;
+    this->nXSize = nXSize;
+    this->nYSize = nYSize;
+
+    /*
+      - create file
+      - define if is projected
+      - create dims
+      - create empty bands based on eType
+      -?
+     */
+    return NULL;
+}
+
+
+static GDALDataset*
+NCDFCreateCopy3( const char * pszFilename, GDALDataset *poSrcDS, 
+                 int bStrict, char ** papszOptions, 
+                 GDALProgressFunc pfnProgress, void * pProgressData )
+    
+{
+    NCDFCreateHelper *poCreateHelper = new NCDFCreateHelper();
+    GDALDataset *poDataset =
+        poCreateHelper->CreateCopy( pszFilename, poSrcDS, 
+                                    bStrict, papszOptions, 
+                                    pfnProgress, pProgressData );
+    delete poCreateHelper;
+    return poDataset;
+}
+
+
+
+GDALDataset*
+NCDFCreateHelper::CreateCopy( const char * pszFilename, GDALDataset *poSrcDS, 
+                              int bStrict, char ** papszOptions, 
+                              GDALProgressFunc pfnProgress, void * pProgressData )
+
+{
+    void *pScaledProgress;
 
     CPLDebug( "GDAL_netCDF", "\n=====\nNCDFCreateCopy( %s, ... )\n", pszFilename );
- 
+
+    nBands = poSrcDS->GetRasterCount();
+    nXSize = poSrcDS->GetRasterXSize();
+    nYSize = poSrcDS->GetRasterYSize();
+  
 /* -------------------------------------------------------------------- */
 /*      Check input bands for errors                                    */
 /* -------------------------------------------------------------------- */
@@ -3115,8 +3289,14 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         oSRS.importFromWkt( &pszWKT );
     // char *pszProj4Defn = NULL;
     // oSRS.exportToProj4( &pszProj4Defn );
-
+        if( oSRS.IsProjected() )
+            bIsProjected = TRUE;
+        else if( oSRS.IsGeographic() )
+            bIsGeographic = TRUE;
     }
+    CPLDebug( "GDAL_netCDF", "bIsProjected: %d bIsGeographic: %d", 
+              bIsProjected, bIsGeographic );
+
     eErr = poSrcDS->GetGeoTransform( adfGeoTransform );
     *szGeoTransform = '\0';
     for( int i=0; i<6; i++ ) {
@@ -3135,10 +3315,91 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         bSourceHasGeoTransform = FALSE;
     }
 
-
 /* -------------------------------------------------------------------- */
 /*      Process options.                                                */
 /* -------------------------------------------------------------------- */
+    ProcessOptions( papszOptions );
+
+/* -------------------------------------------------------------------- */
+/*      Create the dataset.                                             */
+/* -------------------------------------------------------------------- */
+    status = nc_create( pszFilename, nCreateMode,  &fpImage );
+
+    if( status != NC_NOERR )
+    {
+        CPLError( CE_Failure, CPLE_OpenFailed, 
+                  "Unable to create netCDF file %s (Error code %d): %s .\n", 
+                  pszFilename, status, nc_strerror(status) );
+        return NULL;
+    }
+
+/* -------------------------------------------------------------------- */
+/*      Copy global metadata                                            */
+/*      Add Conventions, GDAL info and history                          */
+/* -------------------------------------------------------------------- */
+    CopyMetadata((void *) poSrcDS, fpImage, NC_GLOBAL );
+    NCDFAddGDALHistory( fpImage, pszFilename,
+                        poSrcDS->GetMetadataItem("NC_GLOBAL#history","") );
+
+/* -------------------------------------------------------------------- */
+/*      Define dimensions and bands                                     */
+/* -------------------------------------------------------------------- */
+    DefineDims( poSrcDS ); 
+    DefineBands( poSrcDS );
+
+    status = nc_enddef( fpImage );
+    NCDF_ERR(status);    
+
+/* -------------------------------------------------------------------- */
+/*      Write projection values                                         */
+/* -------------------------------------------------------------------- */
+    pScaledProgress = GDALCreateScaledProgress( 0.10, 0.50, pfnProgress, 
+                                                pProgressData );
+
+    WriteDims( poSrcDS, GDALScaledProgress, pScaledProgress );
+    
+    GDALDestroyScaledProgress( pScaledProgress );
+
+/* -------------------------------------------------------------------- */
+/*      Write Bands                                                     */
+/* -------------------------------------------------------------------- */
+    pScaledProgress = GDALCreateScaledProgress( 0.50, 0.90, pfnProgress, 
+                                                pProgressData );
+    
+    // CopyBands( poSrcDS, GDALScaledProgress, pScaledProgress );
+    // DefineBands( poSrcDS );
+
+    CopyBandData( poSrcDS, GDALScaledProgress, pScaledProgress );
+
+    GDALDestroyScaledProgress( pScaledProgress );
+
+/* -------------------------------------------------------------------- */
+/*      Cleanup and close.                                              */
+/* -------------------------------------------------------------------- */
+    nc_close( fpImage );
+// CPLFree(pszProj4Defn );
+ 
+    pfnProgress( 0.95, NULL, pProgressData );
+
+/* -------------------------------------------------------------------- */
+/*      Re-open dataset, and copy any auxilary pam information.         */
+/*      Disable PAM, at least temporarily. See bug #4244                */
+/* -------------------------------------------------------------------- */
+    netCDFDataset *poDS = (netCDFDataset *) GDALOpen( pszFilename, GA_ReadOnly );
+
+    // if( poDS )
+    //     poDS->CloneInfo( poSrcDS, GCIF_PAM_DEFAULT );
+    
+    pfnProgress( 1.0, NULL, pProgressData );
+
+    return poDS;
+}
+
+/* note: some logic depends on bIsProjected and bIsGeoGraphic */
+/* which may not be known when Create() is called */
+void
+NCDFCreateHelper::ProcessOptions( char ** papszOptions )
+{
     /* File format */
     nFormat = NCDF_FORMAT_NC;
     pszValue = CSLFetchNameValue( papszOptions, "FORMAT" );
@@ -3204,30 +3465,26 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
 #endif
 
-    /* code for compression support - avoid code duplication */
-    /* with refactoring this could be a function */
-#ifdef NETCDF_HAS_NC4
-// must set chunk size to avoid huge performace hit                
-// perhaps another solution it to change the chunk cache?
-// http://www.unidata.ucar.edu/software/netcdf/docs/netcdf.html#Chunk-Cache
-#define NCDF_DEF_VAR_DEFLATE \
-           if ( nCompress == NCDF_COMPRESS_DEFLATE ) { \
-                status = nc_def_var_deflate(fpImage,NCDFVarID,1,1,nZLevel); \
-                NCDF_ERR(status) \
-                size_t chunksize[] = { 1, nXSize }; \
-                status = nc_def_var_chunking( fpImage, NCDFVarID, \
-                                              NC_CHUNKED, chunksize ); \
-                NCDF_ERR(status) \
-            } 
-#define NCDF_DEF_VAR_DEFLATE_NOCHUNK \
-           if ( nCompress == NCDF_COMPRESS_DEFLATE ) { \
-                status = nc_def_var_deflate(fpImage,NCDFVarID,1,1,nZLevel); \
-                NCDF_ERR(status) \
-            } 
-#else
-#define NCDF_DEF_VAR_DEFLATE
-#define NCDF_DEF_VAR_DEFLATE_NOCHUNK
+    /* set nCreateMode based on nFormat */
+    switch ( nFormat ) {        
+#ifdef NETCDF_HAS_NC2
+        case NCDF_FORMAT_NC2:
+            nCreateMode = NC_CLOBBER|NC_64BIT_OFFSET;
+            break;
 #endif
+#ifdef NETCDF_HAS_NC4
+        case NCDF_FORMAT_NC4:
+            nCreateMode = NC_CLOBBER|NC_NETCDF4;
+            break;
+        case NCDF_FORMAT_NC4C:
+            nCreateMode = NC_CLOBBER|NC_NETCDF4|NC_CLASSIC_MODEL;
+            break;
+#endif
+        case NCDF_FORMAT_NC:
+        default:
+            nCreateMode = NC_CLOBBER;
+            break;
+    }
 
 
     CPLDebug( "GDAL_netCDF", 
@@ -3242,7 +3499,7 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
     /* TODO could add a config option GDAL_NETCDF_PREF=GDAL/CF  */
 
-    if( oSRS.IsProjected() ) 
+    if( bIsProjected ) 
     {
         int bIsCfProjection = NCDFIsCfProjection( oSRS.GetAttrValue( "PROJECTION" ) );
         bWriteGridMapping = TRUE;
@@ -3271,7 +3528,7 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
     else 
     { 
         /* files without a Datum will not have a grid_mapping variable and geographic information */
-        if ( oSRS.IsGeographic() )  bWriteGridMapping = TRUE;
+        if ( bIsGeographic )  bWriteGridMapping = TRUE;
         else  bWriteGridMapping = FALSE;
         bWriteGdalTags = CSLFetchBoolean( papszOptions, "WRITE_GDAL_TAGS", bWriteGridMapping );
 
@@ -3308,53 +3565,21 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
               "bWriteGridMapping=%d bWriteGdalTags=%d bWriteLonLat=%d bBottomUp=%d",
               bWriteGridMapping,bWriteGdalTags,bWriteLonLat,bBottomUp );
 
+}
+
+void
+NCDFCreateHelper::DefineDims( GDALDataset *poSrcDS )
+{
 /* -------------------------------------------------------------------- */
-/*      Create the dataset.                                             */
+/*      Define dimensions                                               */
 /* -------------------------------------------------------------------- */
-
-    int fpImage;
-    int status;
-    int nXDimID = 0;
-    int nYDimID = 0;
-    int nLonDimID = 0;
-    int nLatDimID = 0;
-    
-    // status = nc_create( pszFilename, NC_CLOBBER,  &fpImage );
-    switch ( nFormat ) {        
-#ifdef NETCDF_HAS_NC2
-        case NCDF_FORMAT_NC2:
-            nCreateMode = NC_CLOBBER|NC_64BIT_OFFSET;
-            break;
-#endif
-#ifdef NETCDF_HAS_NC4
-        case NCDF_FORMAT_NC4:
-            nCreateMode = NC_CLOBBER|NC_NETCDF4;
-            break;
-        case NCDF_FORMAT_NC4C:
-            nCreateMode = NC_CLOBBER|NC_NETCDF4|NC_CLASSIC_MODEL;
-            break;
-#endif
-        case NCDF_FORMAT_NC:
-        default:
-            nCreateMode = NC_CLOBBER;
-            break;
-    }
-
-    status = nc_create( pszFilename, nCreateMode,  &fpImage );
-
-    if( status != NC_NOERR )
-    {
-        CPLError( CE_Failure, CPLE_OpenFailed, 
-                  "Unable to create netCDF file %s (Error code %d): %s .\n", 
-                  pszFilename, status, nc_strerror(status) );
-        return NULL;
-    }
-
-    if( oSRS.IsProjected() ) 
+    if( bIsProjected ) 
     {
         status = nc_def_dim( fpImage, NCDF_DIMNAME_X, nXSize, &nXDimID );
+        NCDF_ERR(status);
         CPLDebug( "GDAL_netCDF", "status nc_def_dim %s = %d", NCDF_DIMNAME_X, status );   
         status = nc_def_dim( fpImage, NCDF_DIMNAME_Y, nYSize, &nYDimID );
+        NCDF_ERR(status);
         CPLDebug( "GDAL_netCDF", "status nc_def_dim %s = %d", NCDF_DIMNAME_Y, status );
         anBandDims[0] = nYDimID;
         anBandDims[1] = nXDimID;
@@ -3364,46 +3589,26 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
     else 
     { 
         status = nc_def_dim( fpImage, pszLonDimName, nLonSize, &nLonDimID );
+        NCDF_ERR(status);
         CPLDebug( "GDAL_netCDF", "status nc_def_dim %s = %d", pszLonDimName, status );   
         status = nc_def_dim( fpImage, pszLatDimName, nLatSize, &nLatDimID );
+        NCDF_ERR(status);
         CPLDebug( "GDAL_netCDF", "status nc_def_dim %s = %d", pszLatDimName, status );   
         anBandDims[0] = nLatDimID;
         anBandDims[1] = nLonDimID;       
         CPLDebug( "GDAL_netCDF", "nLonDimID = %d", nLonDimID );
         CPLDebug( "GDAL_netCDF", "nLatDimID = %d", nLatDimID );
     }
-   
-/* -------------------------------------------------------------------- */
-/*      Copy global metadata                                            */
-/*      Add Conventions, GDAL info and history                          */
-/* -------------------------------------------------------------------- */
-    CopyMetadata((void *) poSrcDS, fpImage, NC_GLOBAL );
-    NCDFAddGDALHistory( fpImage, pszFilename,
-                        poSrcDS->GetMetadataItem("NC_GLOBAL#history","") );
-    
-/* -------------------------------------------------------------------- */
-/*      Get projection values                                           */
-/* -------------------------------------------------------------------- */
-
-    if( oSRS.IsProjected() )
-    {
-        const OGR_SRSNode *poPROJCS = oSRS.GetAttrNode( "PROJCS" );
-        const char  *pszProjection;
-        OGRSpatialReference *poLatLonCRS = NULL;
-        OGRCoordinateTransformation *poTransform = NULL;
-
-        double *padYVal = NULL;
-        double *padXVal = NULL;
-        size_t startX[1];
-        size_t countX[1];
-        size_t startY[1];
-        size_t countY[1];
-
-        pszProjection = oSRS.GetAttrValue( "PROJECTION" );
 
 /* -------------------------------------------------------------------- */
 /*      Write projection attributes                                     */
 /* -------------------------------------------------------------------- */
+    if( bIsProjected ) 
+    {
+
+        const OGR_SRSNode *poPROJCS = oSRS.GetAttrNode( "PROJCS" );
+        const char  *pszProjection;
+        pszProjection = oSRS.GetAttrValue( "PROJECTION" );
 
         /* Basic Projection info (grid_mapping and datum) */
         for( int i=0; poNetcdfSRS_PT[i].WKT_SRS != NULL; i++ ) {
@@ -3411,17 +3616,18 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                 CPLDebug( "GDAL_netCDF", "GDAL PROJECTION = %s , NCDF PROJECTION = %s", 
                           poNetcdfSRS_PT[i].WKT_SRS, 
                           poNetcdfSRS_PT[i].CF_SRS);
-                strcpy( pszNetcdfProjection, poNetcdfSRS_PT[i].CF_SRS );
+                strcpy( szNetcdfProjection, poNetcdfSRS_PT[i].CF_SRS );
                 status = nc_def_var( fpImage, 
                                      poNetcdfSRS_PT[i].CF_SRS,
                                      NC_CHAR, 
                                      0, NULL, &NCDFVarID );
+                NCDF_ERR(status);
                 break;
             }
         }
         nc_put_att_text( fpImage, NCDFVarID, CF_GRD_MAPPING_NAME,
-                         strlen( pszNetcdfProjection ),
-                         pszNetcdfProjection );
+                         strlen( szNetcdfProjection ),
+                         szNetcdfProjection );
 
         /* write DATUM information */
         dfTemp = oSRS.GetPrimeMeridian();
@@ -3456,6 +3662,380 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                              strlen( szGeoTransform ),
                              szGeoTransform );
         }
+        /* also add vars??? */
+    }
+
+
+    /* If not Projected assume Geographic to catch grids without Datum */
+    else 
+    {
+
+/* -------------------------------------------------------------------- */
+/*      Write CF-1.x compliant Geographics attributes                   */
+/*      Note: WKT information will not be preserved (e.g. WGS84)        */
+/* -------------------------------------------------------------------- */
+        
+        if( bWriteGridMapping == TRUE ) 
+ 	    {
+            strcpy( szNetcdfProjection, "crs" );
+            nc_def_var( fpImage, szNetcdfProjection, NC_CHAR, 
+                        0, NULL, &NCDFVarID );
+            NCDF_ERR(status);
+            nc_put_att_text( fpImage, NCDFVarID, CF_GRD_MAPPING_NAME,
+                             strlen(CF_PT_LATITUDE_LONGITUDE),
+                             CF_PT_LATITUDE_LONGITUDE );
+
+            /* ET - this should be written in a common block with projected */
+
+            /* write DATUM information */
+            dfTemp = oSRS.GetPrimeMeridian();
+            nc_put_att_double( fpImage, NCDFVarID, CF_PP_LONG_PRIME_MERIDIAN,
+                               NC_DOUBLE, 1, &dfTemp );
+            dfTemp = oSRS.GetSemiMajor();
+            nc_put_att_double( fpImage, NCDFVarID, CF_PP_SEMI_MAJOR_AXIS,
+                               NC_DOUBLE, 1, &dfTemp );
+            dfTemp = oSRS.GetInvFlattening();
+            nc_put_att_double( fpImage, NCDFVarID, CF_PP_INVERSE_FLATTENING,
+                               NC_DOUBLE, 1, &dfTemp );
+
+            if ( bWriteGdalTags ) {
+                // if ( strlen(pszProj4Defn) > 0 ) {
+                //     nc_put_att_text( fpImage, NCDFVarID, "proj4",
+                //                      strlen( pszProj4Defn ), pszProj4Defn );
+                // }
+                pszWKT = (char *) poSrcDS->GetProjectionRef() ;
+                nc_put_att_text( fpImage, NCDFVarID, NCDF_SPATIAL_REF,
+                                 strlen( pszWKT ), pszWKT );
+                /* Only write GeoTransform in absence of lon/lat values */
+                if ( bWriteLonLat == FALSE ) {
+                    nc_put_att_text( fpImage, NCDFVarID, NCDF_GEOTRANSFORM,
+                                     strlen( szGeoTransform ), 
+                                     szGeoTransform );
+                }
+            }
+        }
+        
+    }
+    
+}
+
+
+/* TODO move this to netcdfRasterBand */
+void
+NCDFCreateHelper::DefineBands( GDALDataset *poSrcDS )
+{
+
+/* -------------------------------------------------------------------- */
+/*      Initialize Band Map                                             */
+/* -------------------------------------------------------------------- */
+/* TODO: What was this used for? */
+    // for(int j=1; j <= nBands; j++ ) {
+    //     anBandMap[j-1]=j;
+    // }
+
+/* -------------------------------------------------------------------- */
+/*      Create netCDF variable                                          */
+/* -------------------------------------------------------------------- */
+
+    panNCDFVarID = (int *) CPLMalloc( nBands * sizeof(int) );
+
+    for( int i=1; i <= nBands; i++ ) {
+        
+        CPLDebug( "GDAL_netCDF", "DefineBands(), i=%d/%d ",i,nBands );
+
+        char      szBandName[ NC_MAX_NAME ];
+        int       NCDFVarID = -1;
+        double    dfNoDataValue;
+        /* unsigned char not supported by netcdf-3 */
+        signed char cNoDataValue; 
+        unsigned char ucNoDataValue; 
+        float     fNoDataValue;
+        int       nlNoDataValue;
+        short     nsNoDataValue;
+        GDALRasterBandH	hBand;
+        const char *tmpMetadata;
+        char      szLongName[ NC_MAX_NAME ];
+
+        nc_type nDataType = NC_NAT;
+        GDALRasterBand *poSrcBand = poSrcDS->GetRasterBand( i );
+        hBand = GDALGetRasterBand( poSrcDS, i );
+
+        /* Get var name from NETCDF_VARNAME */
+        tmpMetadata = poSrcBand->GetMetadataItem("NETCDF_VARNAME");
+       	if( tmpMetadata != NULL) {
+            if( nBands > 1 ) sprintf(szBandName,"%s%d",tmpMetadata,i);
+            else strcpy( szBandName, tmpMetadata );
+            // poSrcBand->SetMetadataItem("NETCDF_VARNAME","");
+        }
+        else 
+            sprintf( szBandName, "Band%d", i );
+
+        /* Get long_name from <var>#long_name */
+        sprintf(szLongName,"%s#%s",
+                poSrcBand->GetMetadataItem("NETCDF_VARNAME"),
+                CF_LNG_NAME);
+        tmpMetadata = poSrcDS->GetMetadataItem(szLongName);
+        if( tmpMetadata != NULL) 
+            strcpy( szLongName, tmpMetadata);
+        else 
+            sprintf( szLongName, "GDAL Band Number %d", i); 
+
+
+        CPLDebug("GDAL_netCDF", "Define Band #%d - %s", i, szLongName );
+
+/* -------------------------------------------------------------------- */
+/*      Get Data type                                                   */
+/* -------------------------------------------------------------------- */
+ 
+        eDT = poSrcBand->GetRasterDataType();
+
+        eErr = CE_None;
+
+        dfNoDataValue = poSrcBand->GetNoDataValue(0);
+
+/* -------------------------------------------------------------------- */
+/*      Byte                                                            */
+/* -------------------------------------------------------------------- */
+        if( eDT == GDT_Byte ) {
+            CPLDebug( "GDAL_netCDF", "%s = GDT_Byte ",szBandName );
+ 
+            nDataType = NC_BYTE;
+
+/* -------------------------------------------------------------------- */
+/*      Define variable and attributes                                  */
+/* -------------------------------------------------------------------- */
+
+            /* GDAL defaults to unsigned bytes, but check if metadata says its
+               signed, as NetCDF can support this for certain formats. */
+            int nSignedByte = FALSE;
+            tmpMetadata = poSrcBand->GetMetadataItem("PIXELTYPE",
+                                                     "IMAGE_STRUCTURE");
+            if ( tmpMetadata && EQUAL(tmpMetadata,"SIGNEDBYTE") ) {
+                nSignedByte = TRUE;
+            }
+            else {
+                /* No unsigned byte datatype in pre NC4, and NC4-Classic 
+                   Rely on valid_range and _Unsigned convention below 
+                   For NC4, just set type to NC_UBYTE */
+#ifdef NETCDF_HAS_NC4
+                if ( nFormat == NCDF_FORMAT_NC4 )
+                    nDataType = NC_UBYTE; 
+#endif
+            }
+            
+            status = nc_def_var( fpImage, szBandName, nDataType, 
+                                 NCDF_NBDIM, anBandDims, &NCDFVarID );
+            if ( status != NC_NOERR ) {
+                NCDF_ERR(status);
+                continue;
+            }
+            panNCDFVarID[i-1] = NCDFVarID;
+      
+            CPLDebug( "GDAL_netCDF", "defined Byte var, signed=%d, type=%d, id=%d/%d",
+                      nSignedByte,nDataType,NCDFVarID,panNCDFVarID[i-1]);
+      
+            DefVarDeflate( NCDFVarID );
+            
+            /* Fill Value */
+            // cNoDataValue=(unsigned char) dfNoDataValue;
+            // nc_put_att_schar( fpImage, NCDFVarID, _FillValue,
+            //                   nDataType, 1, &cNoDataValue );            
+            // NCDF_ERR(status);
+
+            if ( nSignedByte ) {
+                cNoDataValue = (signed char) dfNoDataValue;
+                CPLDebug( "GDAL_netCDF", "adding nodata signed [%f]", dfNoDataValue );
+                status = nc_put_att_schar( fpImage, NCDFVarID, _FillValue,
+                                           nDataType, 1, &cNoDataValue );            
+            }
+            else {
+                ucNoDataValue = (unsigned char) dfNoDataValue;
+                CPLDebug( "GDAL_netCDF", "adding nodata unsigned [%f]", dfNoDataValue );
+                status = nc_put_att_uchar( fpImage, NCDFVarID, _FillValue,
+                                           nDataType, 1, &ucNoDataValue );            
+            }
+            NCDF_ERR(status);
+            
+            CPLDebug( "GDAL_netCDF", "adding valid_range attributes" );
+            /* For unsigned NC_BYTE (except NC4 format) */
+            /* add valid_range and _Unsigned ( defined in CF-1 and NUG ) */
+            if ( (nDataType == NC_BYTE) && (nFormat != NCDF_FORMAT_NC4) ) {
+                short int adfValidRange[2]; 
+                if  ( nSignedByte ) {
+                    adfValidRange[0] = -128;
+                    adfValidRange[1] = 127;
+                    status = nc_put_att_text( fpImage, NCDFVarID, 
+                                              "_Unsigned", 5, "false" );
+                }
+                else {
+                    adfValidRange[0] = 0;
+                    adfValidRange[1] = 255;
+                    status = nc_put_att_text( fpImage, NCDFVarID, 
+                                              "_Unsigned", 4, "true" );
+                }
+                status=nc_put_att_short( fpImage, NCDFVarID, "valid_range",
+                                         NC_SHORT, 2, adfValidRange );
+            }
+
+/* -------------------------------------------------------------------- */
+/*      Int16                                                           */
+/* -------------------------------------------------------------------- */
+
+        } else if( ( eDT == GDT_UInt16 ) || ( eDT == GDT_Int16 ) ) {
+            CPLDebug( "GDAL_netCDF", "%s = GDT_Int16 ",szBandName );
+
+/* -------------------------------------------------------------------- */
+/*      Define variable and attributes                                  */
+/* -------------------------------------------------------------------- */
+            nDataType = NC_SHORT;
+            status = nc_def_var( fpImage, szBandName, nDataType, 
+                                 NCDF_NBDIM, anBandDims, &NCDFVarID );
+            if ( status != NC_NOERR ) {
+                NCDF_ERR(status);
+                continue;
+            }
+            panNCDFVarID[i-1] = NCDFVarID;
+
+            DefVarDeflate( NCDFVarID );
+
+            nsNoDataValue= (GInt16) dfNoDataValue;
+            nc_put_att_short( fpImage, NCDFVarID, _FillValue,
+                              nDataType, 1, &nsNoDataValue );
+
+/* -------------------------------------------------------------------- */
+/*      Int32                                                           */
+/* -------------------------------------------------------------------- */
+
+        } else if( (eDT == GDT_UInt32) || (eDT == GDT_Int32) ) {
+            CPLDebug( "GDAL_netCDF", "%s = GDT_Int32 ",szBandName );
+
+            nDataType = NC_INT;
+
+/* -------------------------------------------------------------------- */
+/*      Define variable and attributes                                  */
+/* -------------------------------------------------------------------- */
+            status = nc_def_var( fpImage, szBandName, nDataType, 
+                                 NCDF_NBDIM, anBandDims, &NCDFVarID );
+            if ( status != NC_NOERR ) {
+                NCDF_ERR(status);
+                continue;
+            }
+            panNCDFVarID[i-1] = NCDFVarID;
+
+            DefVarDeflate( NCDFVarID );
+            
+            nlNoDataValue= (GInt32) dfNoDataValue;
+            nc_put_att_int( fpImage, NCDFVarID, _FillValue, 
+                            nDataType, 1, &nlNoDataValue );
+
+/* -------------------------------------------------------------------- */
+/*      float                                                           */
+/* -------------------------------------------------------------------- */
+        } else if( (eDT == GDT_Float32) ) {
+            CPLDebug( "GDAL_netCDF", "%s = GDT_Float32 ",szBandName );
+
+            nDataType = NC_FLOAT;
+
+/* -------------------------------------------------------------------- */
+/*      Define variable and attributes                                  */
+/* -------------------------------------------------------------------- */
+            status = nc_def_var( fpImage, szBandName, nDataType, 
+                                 NCDF_NBDIM, anBandDims, &NCDFVarID );
+            if ( status != NC_NOERR ) {
+                NCDF_ERR(status);
+                continue;
+            }
+            panNCDFVarID[i-1] = NCDFVarID;
+
+            DefVarDeflate( NCDFVarID );
+
+            fNoDataValue= (float) dfNoDataValue;
+            nc_put_att_float( fpImage, NCDFVarID, _FillValue, 
+                              nDataType, 1, &fNoDataValue );
+
+/* -------------------------------------------------------------------- */
+/*      double                                                          */
+/* -------------------------------------------------------------------- */
+        } else if( (eDT == GDT_Float64) ) {
+            CPLDebug( "GDAL_netCDF", "%s = GDT_Float64 ",szBandName );
+
+            nDataType = NC_DOUBLE;
+
+/* -------------------------------------------------------------------- */
+/*      Define variable and attributes                                  */
+/* -------------------------------------------------------------------- */
+            status = nc_def_var( fpImage, szBandName, nDataType, 
+                                 NCDF_NBDIM, anBandDims, &NCDFVarID );
+            if ( status != NC_NOERR ) {
+                NCDF_ERR(status);
+                continue;
+            }
+            panNCDFVarID[i-1] = NCDFVarID;
+
+            DefVarDeflate( NCDFVarID );
+
+            nc_put_att_double( fpImage, NCDFVarID, _FillValue,
+                               nDataType, 1, &dfNoDataValue );
+
+        }
+        else {
+            CPLError( CE_Failure, CPLE_NotSupported,
+                      "The NetCDF driver does not support GDAL data type %d",
+                      eDT );
+        }
+        
+/* -------------------------------------------------------------------- */
+/*      Copy Metadata for band                                          */
+/* -------------------------------------------------------------------- */
+        status =  nc_put_att_text( fpImage, NCDFVarID, CF_LNG_NAME, 
+                                   strlen( szLongName ), szLongName );
+        NCDF_ERR(status);
+
+        CopyMetadata( (void *) hBand, fpImage, NCDFVarID );
+
+/* -------------------------------------------------------------------- */
+/*      Write Projection for band                                       */
+/* -------------------------------------------------------------------- */
+        if( bWriteGridMapping == TRUE ) {
+            status = nc_put_att_text( fpImage, NCDFVarID, CF_GRD_MAPPING,
+                                      strlen( szNetcdfProjection ),
+                                      szNetcdfProjection );
+            NCDF_ERR(status);
+            if ( bWriteLonLat == TRUE ) {
+                status = nc_put_att_text( fpImage, NCDFVarID, CF_COORDINATES,
+                                          strlen( NCDF_LONLAT ), NCDF_LONLAT );
+                NCDF_ERR(status);
+            }           
+        }
+
+    } // for nBands
+
+}
+
+void NCDFCreateHelper::WriteDims( GDALDataset *poSrcDS, 
+                                  GDALProgressFunc pfnProgress, void *pProgressData )
+{
+    double dfX0, dfDX, dfY0, dfDY;
+    dfX0=0.0, dfDX=0.0, dfY0=0.0, dfDY=0.0;
+
+/* -------------------------------------------------------------------- */
+/*      Get projection values                                           */
+/* -------------------------------------------------------------------- */
+
+    if( bIsProjected )
+    {
+        const char  *pszProjection;
+        OGRSpatialReference *poLatLonCRS = NULL;
+        OGRCoordinateTransformation *poTransform = NULL;
+
+        double *padYVal = NULL;
+        double *padXVal = NULL;
+        size_t startX[1];
+        size_t countX[1];
+        size_t startY[1];
+        size_t countY[1];
+
+        pszProjection = oSRS.GetAttrValue( "PROJECTION" );
 
 /* -------------------------------------------------------------------- */
 /*      CF projection X/Y attributes                                    */
@@ -3552,19 +4132,24 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
             }
         }
 
-        pfnProgress( 0.30, NULL, pProgressData );
+        pfnProgress( 0.50, NULL, pProgressData );
 
         /* Free the srs and transform objects */
         if ( poLatLonCRS != NULL ) CPLFree( poLatLonCRS );
         if ( poTransform != NULL ) CPLFree( poTransform );
 
 /* -------------------------------------------------------------------- */
-/*      Write X attributes                                              */
+/*      Write X attributes and values                                   */
 /* -------------------------------------------------------------------- */
+        /* TODO - define before (in DefineDims()) for efficiency and so that dim vars are before band */
+        status = nc_redef( fpImage );
+        NCDF_ERR(status);
+
         int anXDims[1];
         anXDims[0] = nXDimID;
         status = nc_def_var( fpImage, NCDF_DIMNAME_X, NC_DOUBLE, 
                              1, anXDims, &NCDFVarID );
+        NCDF_ERR(status);
         nc_put_att_text( fpImage, NCDFVarID, CF_STD_NAME,
                          strlen(CF_PROJ_X_COORD),
                          CF_PROJ_X_COORD );
@@ -3574,27 +4159,26 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         /*TODO verify this */
         nc_put_att_text( fpImage, NCDFVarID, CF_UNITS, 1, "m" ); 
 
-/* -------------------------------------------------------------------- */
-/*      Write X values                                                  */
-/* -------------------------------------------------------------------- */
-
-        /* Temporarily switch to data mode and write data */
         status = nc_enddef( fpImage );
+        NCDF_ERR(status);
+
         CPLDebug("GDAL_netCDF", "Writing X values" );
         status = nc_put_vara_double( fpImage, NCDFVarID, startX,
                                      countX, padXVal);
-        status = nc_redef( fpImage );
-        
-        /* free values */
+        NCDF_ERR(status);
         CPLFree( padXVal );
 
 /* -------------------------------------------------------------------- */
-/*      Write Y attributes                                              */
+/*      Write Y attributes and values                                   */
 /* -------------------------------------------------------------------- */
+        status = nc_redef( fpImage );
+        NCDF_ERR(status);
+
         int anYDims[1];
         anYDims[0] = nYDimID;
         status = nc_def_var( fpImage, NCDF_DIMNAME_Y, NC_DOUBLE, 
                              1, anYDims, &NCDFVarID );
+        NCDF_ERR(status);
         nc_put_att_text( fpImage, NCDFVarID, CF_STD_NAME,
                          strlen(CF_PROJ_Y_COORD),
                          CF_PROJ_Y_COORD );
@@ -3603,69 +4187,19 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                          "y coordinate of projection" );
         nc_put_att_text( fpImage, NCDFVarID, CF_UNITS, 1, "m" ); 
 
-/* -------------------------------------------------------------------- */
-/*      Write Y values                                                  */
-/* -------------------------------------------------------------------- */
-
-        /* Temporarily switch to data mode and write data */
         status = nc_enddef( fpImage );
+        NCDF_ERR(status);
+
         CPLDebug("GDAL_netCDF", "Writing Y values" );
         status = nc_put_vara_double( fpImage, NCDFVarID, startY,
                                      countY, padYVal);
-        status = nc_redef( fpImage );
-        
-        /* free values */
+        NCDF_ERR(status);
         CPLFree( padYVal );
 
     } // projected
 
     else  {  /* If not Projected assume Geographic to catch grids without Datum */
         	
-/* -------------------------------------------------------------------- */
-/*      Write CF-1.x compliant Geographics attributes                   */
-/*      Note: WKT information will not be preserved (e.g. WGS84)        */
-/* -------------------------------------------------------------------- */
-        
-        if( bWriteGridMapping == TRUE ) 
- 	    {
-            strcpy( pszNetcdfProjection, "crs" );
-            nc_def_var( fpImage, pszNetcdfProjection, NC_CHAR, 
-                        0, NULL, &NCDFVarID );
-            nc_put_att_text( fpImage, NCDFVarID, CF_GRD_MAPPING_NAME,
-                             strlen(CF_PT_LATITUDE_LONGITUDE),
-                             CF_PT_LATITUDE_LONGITUDE );
-
-            /* ET - this should be written in a common block with projected */
-
-            /* write DATUM information */
-            dfTemp = oSRS.GetPrimeMeridian();
-            nc_put_att_double( fpImage, NCDFVarID, CF_PP_LONG_PRIME_MERIDIAN,
-                               NC_DOUBLE, 1, &dfTemp );
-            dfTemp = oSRS.GetSemiMajor();
-            nc_put_att_double( fpImage, NCDFVarID, CF_PP_SEMI_MAJOR_AXIS,
-                               NC_DOUBLE, 1, &dfTemp );
-            dfTemp = oSRS.GetInvFlattening();
-            nc_put_att_double( fpImage, NCDFVarID, CF_PP_INVERSE_FLATTENING,
-                               NC_DOUBLE, 1, &dfTemp );
-
-            if ( bWriteGdalTags ) {
-                // if ( strlen(pszProj4Defn) > 0 ) {
-                //     nc_put_att_text( fpImage, NCDFVarID, "proj4",
-                //                      strlen( pszProj4Defn ), pszProj4Defn );
-                // }
-                pszWKT = (char *) poSrcDS->GetProjectionRef() ;
-                nc_put_att_text( fpImage, NCDFVarID, NCDF_SPATIAL_REF,
-                                 strlen( pszWKT ), pszWKT );
-                /* Only write GeoTransform in absence of lon/lat values */
-                if ( bWriteLonLat == FALSE ) {
-                    nc_put_att_text( fpImage, NCDFVarID, NCDF_GEOTRANSFORM,
-                                     strlen( szGeoTransform ), 
-                                     szGeoTransform );
-                }
-            }
-        }
-        
-
 /* -------------------------------------------------------------------- */
 /*      Get latitude values                                             */
 /* -------------------------------------------------------------------- */
@@ -3706,9 +4240,9 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         startLon[0] = 0;
         countLon[0] = nXSize;
         
-    }// not projected
+    }// not projected 
     
-    pfnProgress( 0.40, NULL, pProgressData );
+    pfnProgress( 0.80, NULL, pProgressData );
 
 /* -------------------------------------------------------------------- */
 /*      Write CF projection lat/lon attributes                          */
@@ -3716,64 +4250,73 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
     if ( bWriteLonLat == TRUE ) {
 
 /* -------------------------------------------------------------------- */
-/*      Write latitude attributes                                     */
+/*      Write latitude attributes and values                            */
 /* -------------------------------------------------------------------- */
-        if ( oSRS.IsProjected() ) {
+        status = nc_redef( fpImage );
+        NCDF_ERR(status);
+
+        /* latitude attributes */
+        if ( bIsProjected ) {
             int anLatDims[2];
             anLatDims[0] = nYDimID;
             anLatDims[1] = nXDimID;
             status = nc_def_var( fpImage, NCDF_DIMNAME_LAT, eLonLatType, 
                                  2, anLatDims, &NCDFVarID );
+            NCDF_ERR(status);
             /* compress lon/lat to save space */
-            NCDF_DEF_VAR_DEFLATE;
+            DefVarDeflate( NCDFVarID );
         }
         else {
             int anLatDims[1];
             anLatDims[0] = nLatDimID;
             status = nc_def_var( fpImage, NCDF_DIMNAME_LAT, eLonLatType, 
-                                 1, anLatDims, &NCDFVarID );                  
+                                 1, anLatDims, &NCDFVarID );  
+            NCDF_ERR(status);                
         }
-        status = nc_put_att_text( fpImage, NCDFVarID, CF_STD_NAME,
-                                8,"latitude" );
-        status = nc_put_att_text( fpImage, NCDFVarID, CF_LNG_NAME,
-                                  8, "latitude" );
-        status = nc_put_att_text( fpImage, NCDFVarID, CF_UNITS,
-                                  13, "degrees_north" );
+        nc_put_att_text( fpImage, NCDFVarID, CF_STD_NAME,
+                         8,"latitude" );
+        nc_put_att_text( fpImage, NCDFVarID, CF_LNG_NAME,
+                         8, "latitude" );
+        nc_put_att_text( fpImage, NCDFVarID, CF_UNITS,
+                         13, "degrees_north" );
 
-/* -------------------------------------------------------------------- */
-/*      Write latitude values                                         */
-/* -------------------------------------------------------------------- */
-
-        /* Temporarily switch to data mode and write data */
         status = nc_enddef( fpImage );
+        NCDF_ERR(status);
+
+        /* latitude values */
         CPLDebug("GDAL_netCDF", "Writing lat values" );
         status = nc_put_vara_double( fpImage, NCDFVarID, startLat,
                                      countLat, padLatVal);
+        NCDF_ERR(status);
 
-        status = nc_redef( fpImage );
-        
         /* free values */
         CPLFree( padLatVal );  
         CPLFree( startLat );
         CPLFree( countLat );
-        
+
 /* -------------------------------------------------------------------- */
-/*      Write longitude attributes                                    */
+/*      Write longitude attributes and values                           */
 /* -------------------------------------------------------------------- */
-        if ( oSRS.IsProjected() ) {
+        status = nc_redef( fpImage );
+        NCDF_ERR(status);
+
+        /* longitude attributes */
+        if ( bIsProjected ) {
             int anLonDims[2];
             anLonDims[0] = nYDimID;
             anLonDims[1] = nXDimID;
             status = nc_def_var( fpImage, NCDF_DIMNAME_LON, eLonLatType, 
                                  2, anLonDims, &NCDFVarID );
+            NCDF_ERR(status);
             /* compress lon/lat to save space */
-            NCDF_DEF_VAR_DEFLATE;
+            DefVarDeflate( NCDFVarID );
         }
         else {
             int anLonDims[1];
             anLonDims[0] = nLonDimID;
             status = nc_def_var( fpImage, NCDF_DIMNAME_LON, eLonLatType, 
                                  1, anLonDims, &NCDFVarID );
+            NCDF_ERR(status);
         }
         nc_put_att_text( fpImage, NCDFVarID, CF_STD_NAME,
                          9, "longitude" );
@@ -3782,16 +4325,14 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         nc_put_att_text( fpImage, NCDFVarID, CF_UNITS,
                          12, "degrees_east" );
         
-/* -------------------------------------------------------------------- */
-/*      Write longitude values                                        */	
-/* -------------------------------------------------------------------- */
-        
-        /* Temporarily switch to data mode and write data */
         status = nc_enddef( fpImage );
+        NCDF_ERR(status);
+
+        /* longitude values */
         CPLDebug("GDAL_netCDF", "Writing lon values" );
         status = nc_put_vara_double( fpImage, NCDFVarID, startLon,
                                     countLon, padLonVal);
-        status = nc_redef( fpImage );
+        NCDF_ERR(status);
         
         /* free values */
         CPLFree( padLonVal );  
@@ -3800,21 +4341,447 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
  
     } // bWriteLonLat
 
-    pfnProgress( 0.50, NULL, pProgressData );
+}
 
-/* -------------------------------------------------------------------- */
-/*      Initialize Band Map                                             */
-/* -------------------------------------------------------------------- */
-/* TODO: What was this used for? */
-    // for(int j=1; j <= nBands; j++ ) {
-    //     anBandMap[j-1]=j;
-    // }
+/* this is just here as reference, use DefineBands and CopyBandData instead */
+// void
+// NCDFCreateHelper::CopyBands( GDALDataset *poSrcDS, 
+//                              GDALProgressFunc pfnProgress, void *pProgressData )
+// {
 
+// /* -------------------------------------------------------------------- */
+// /*      Initialize Band Map                                             */
+// /* -------------------------------------------------------------------- */
+// /* TODO: What was this used for? */
+//     // for(int j=1; j <= nBands; j++ ) {
+//     //     anBandMap[j-1]=j;
+//     // }
+
+// /* -------------------------------------------------------------------- */
+// /*      Create netCDF variable                                          */
+// /* -------------------------------------------------------------------- */
+
+//     for( int i=1; i <= nBands; i++ ) {
+
+//         char      szBandName[ NC_MAX_NAME ];
+//         GByte     *pabScanline  = NULL;
+//         GInt16    *pasScanline  = NULL;
+//         GInt32    *panScanline  = NULL;
+//         float     *pafScanline  = NULL;
+//         double    *padScanline  = NULL;
+//         int       NCDFVarID = 0;
+//         size_t    start[ NCDF_NBDIM ];
+//         size_t    starty[ nYSize ];
+//         size_t    count[ NCDF_NBDIM ];
+//         double    dfNoDataValue;
+//         /* unsigned char not supported by netcdf-3 */
+//         signed char cNoDataValue; 
+//         unsigned char ucNoDataValue; 
+//         float     fNoDataValue;
+//         int       nlNoDataValue;
+//         short     nsNoDataValue;
+//         GDALRasterBandH	hBand;
+//         const char *tmpMetadata;
+//         char      szLongName[ NC_MAX_NAME ];
+
+//         nc_type nDataType = NC_NAT;
+//         GDALRasterBand *poSrcBand = poSrcDS->GetRasterBand( i );
+//         hBand = GDALGetRasterBand( poSrcDS, i );
+
+//         /* Get var name from NETCDF_VARNAME */
+//         tmpMetadata = poSrcBand->GetMetadataItem("NETCDF_VARNAME");
+//        	if( tmpMetadata != NULL) {
+//             if( nBands > 1 ) sprintf(szBandName,"%s%d",tmpMetadata,i);
+//             else strcpy( szBandName, tmpMetadata );
+//             // poSrcBand->SetMetadataItem("NETCDF_VARNAME","");
+//         }
+//         else 
+//             sprintf( szBandName, "Band%d", i );
+
+//         /* Get long_name from <var>#long_name */
+//         sprintf(szLongName,"%s#%s",
+//                 poSrcBand->GetMetadataItem("NETCDF_VARNAME"),
+//                 CF_LNG_NAME);
+//         tmpMetadata = poSrcDS->GetMetadataItem(szLongName);
+//         if( tmpMetadata != NULL) 
+//             strcpy( szLongName, tmpMetadata);
+//         else 
+//             sprintf( szLongName, "GDAL Band Number %d", i); 
+
+// /* -------------------------------------------------------------------- */
+// /*      Avoid code duplication                                          */
+// /* -------------------------------------------------------------------- */
+//         /* pre-calculate start and count to make code shorter */
+//         count[0]=1;
+//         count[1]=nXSize;
+//         start[1]=0;
+//         for( int iLine = 0; iLine < nYSize ; iLine++ )  {
+//             if ( ! bBottomUp )
+//                 starty[iLine] = iLine;
+//             else /* invert latitude values */
+//                 starty[iLine] = nYSize - iLine - 1;
+//         }
+
+//         CPLDebug("GDAL_netCDF", "Writing Band #%d - %s", i, szLongName );
+
+// /* -------------------------------------------------------------------- */
+// /*      Get Data type                                                   */
+// /* -------------------------------------------------------------------- */
+ 
+//         eDT = poSrcBand->GetRasterDataType();
+
+//         eErr = CE_None;
+
+//         dfNoDataValue = poSrcBand->GetNoDataValue(0);
+
+// /* -------------------------------------------------------------------- */
+// /*      Byte                                                            */
+// /* -------------------------------------------------------------------- */
+//         if( eDT == GDT_Byte ) {
+//             CPLDebug( "GDAL_netCDF", "%s = GDT_Byte ",szBandName );
+ 
+//             nDataType = NC_BYTE;
+
+// /* -------------------------------------------------------------------- */
+// /*      Define variable and attributes                                  */
+// /* -------------------------------------------------------------------- */
+
+//             /* GDAL defaults to unsigned bytes, but check if metadata says its
+//                signed, as NetCDF can support this for certain formats. */
+//             int nSignedByte = FALSE;
+//             tmpMetadata = poSrcBand->GetMetadataItem("PIXELTYPE",
+//                                                      "IMAGE_STRUCTURE");
+//             if ( tmpMetadata && EQUAL(tmpMetadata,"SIGNEDBYTE") ) {
+//                 nSignedByte = TRUE;
+//             }
+//             else {
+//                 /* No unsigned byte datatype in pre NC4, and NC4-Classic 
+//                    Rely on valid_range and _Unsigned convention below 
+//                    For NC4, just set type to NC_UBYTE */
+// #ifdef NETCDF_HAS_NC4
+//                 if ( nFormat == NCDF_FORMAT_NC4 )
+//                     nDataType = NC_UBYTE; 
+// #endif
+//             }
+            
+//             status = nc_def_var( fpImage, szBandName, nDataType, 
+//                                  NCDF_NBDIM, anBandDims, &NCDFVarID );
+//             NCDF_ERR(status);
+            
+//             NCDF_DEF_VAR_DEFLATE;
+            
+//             /* Fill Value */
+//             // cNoDataValue=(unsigned char) dfNoDataValue;
+//             // nc_put_att_schar( fpImage, NCDFVarID, _FillValue,
+//             //                   nDataType, 1, &cNoDataValue );            
+//             // NCDF_ERR(status);
+//             if ( nSignedByte ) {
+//                 cNoDataValue = (signed char) dfNoDataValue;
+//                 status = nc_put_att_schar( fpImage, NCDFVarID, _FillValue,
+//                                            nDataType, 1, &cNoDataValue );            
+//             }
+//             else {
+//                 ucNoDataValue = (unsigned char) dfNoDataValue;
+//                 status = nc_put_att_uchar( fpImage, NCDFVarID, _FillValue,
+//                                            nDataType, 1, &ucNoDataValue );            
+//             }
+//             NCDF_ERR(status);
+            
+//             /* For unsigned NC_BYTE (except NC4 format) */
+//             /* add valid_range and _Unsigned ( defined in CF-1 and NUG ) */
+//             if ( (nDataType == NC_BYTE) && (nFormat != NCDF_FORMAT_NC4) ) {
+//                 short int adfValidRange[2]; 
+//                 if  ( nSignedByte ) {
+//                     adfValidRange[0] = -128;
+//                     adfValidRange[1] = 127;
+//                     status = nc_put_att_text( fpImage, NCDFVarID, 
+//                                               "_Unsigned", 5, "false" );
+//                 }
+//                 else {
+//                     adfValidRange[0] = 0;
+//                     adfValidRange[1] = 255;
+//                     status = nc_put_att_text( fpImage, NCDFVarID, 
+//                                               "_Unsigned", 4, "true" );
+//                 }
+//                 NCDF_ERR(status);
+//                 status=nc_put_att_short( fpImage, NCDFVarID, "valid_range",
+//                                          NC_SHORT, 2, adfValidRange );
+//                 NCDF_ERR(status);
+//             }
+            
+// /* -------------------------------------------------------------------- */
+// /*      Read and write data from band i                                 */
+// /* -------------------------------------------------------------------- */
+//             /* End define mode */
+//             status = nc_enddef( fpImage );
+
+//             pabScanline = (GByte *) CPLMalloc( 1 * nXSize * sizeof(GByte) );
+            
+//             for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
+                
+//                 eErr = poSrcBand->RasterIO( GF_Read, 0, iLine, nXSize, 1, 
+//                                             pabScanline, nXSize, 1, GDT_Byte,
+//                                             0,0);
+                
+//                 start[0]=starty[iLine];          
+//                 // status = nc_put_vara_uchar (fpImage, NCDFVarID, start,
+//                 //                             count, pabScanline);
+//                 // NCDF_ERR(status);
+//                 if ( nSignedByte ) 
+//                     status = nc_put_vara_schar (fpImage, NCDFVarID, start,
+//                                                 count, (const signed char*)pabScanline);
+//                 else
+//                     status = nc_put_vara_uchar (fpImage, NCDFVarID, start,
+//                                                 count, pabScanline);
+//                 NCDF_ERR(status);
+
+// // #ifdef NETCDF_HAS_NC4
+// //                 if ( nDataType == NC_UBYTE ) 
+// //                     status = nc_put_vara_uchar (fpImage, NCDFVarID, start,
+// //                                                 count, pabScanline);
+// //                 else
+// //                     status = nc_put_vara_schar (fpImage, NCDFVarID, start,
+// //                                                 count, (const signed char*)pabScanline);
+// // #else
+// //                 status = nc_put_vara_uchar (fpImage, NCDFVarID, start,
+// //                                             count, pabScanline);             
+// // #endif
+
+//                 // NCDF_ERR(status);
+//             }
+
+//             CPLFree( pabScanline );
+
+//             /* Back to define mode */
+//            status = nc_redef( fpImage );
+
+// /* -------------------------------------------------------------------- */
+// /*      Int16                                                           */
+// /* -------------------------------------------------------------------- */
+
+//         } else if( ( eDT == GDT_UInt16 ) || ( eDT == GDT_Int16 ) ) {
+//             CPLDebug( "GDAL_netCDF", "%s = GDT_Int16 ",szBandName );
+
+//             nDataType = NC_SHORT;
+
+// /* -------------------------------------------------------------------- */
+// /*      Define variable and attributes                                  */
+// /* -------------------------------------------------------------------- */
+//             status = nc_def_var( fpImage, szBandName, nDataType, 
+//                                  NCDF_NBDIM, anBandDims, &NCDFVarID );
+
+//             NCDF_DEF_VAR_DEFLATE;
+
+//             nsNoDataValue= (GInt16) dfNoDataValue;
+//             nc_put_att_short( fpImage, NCDFVarID, _FillValue,
+//                               nDataType, 1, &nsNoDataValue );
+
+// /* -------------------------------------------------------------------- */
+// /*      Read and write data from band i                                 */
+// /* -------------------------------------------------------------------- */
+//             status = nc_enddef( fpImage );
+
+//             pasScanline = (GInt16 *) CPLMalloc( 1 * nXSize *
+//                                                 sizeof( GInt16 ) );
+
+//             for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
+
+//                 eErr = poSrcBand->RasterIO( GF_Read, 0, iLine, nXSize, 1, 
+//                                             pasScanline, nXSize, 1, GDT_Int16,
+//                                             0,0);
+
+//                 start[0]=starty[iLine];          
+//                 status = nc_put_vara_short( fpImage, NCDFVarID, start,
+//                                             count, pasScanline);
+//             }
+
+//             CPLFree( pasScanline );
+
+//             status = nc_redef( fpImage );
+
+// /* -------------------------------------------------------------------- */
+// /*      Int32                                                           */
+// /* -------------------------------------------------------------------- */
+
+//         } else if( (eDT == GDT_UInt32) || (eDT == GDT_Int32) ) {
+
+//             CPLDebug( "GDAL_netCDF", "%s = GDT_Int32 ",szBandName );
+
+//             nDataType = NC_INT;
+
+// /* -------------------------------------------------------------------- */
+// /*      Define variable and attributes                                  */
+// /* -------------------------------------------------------------------- */
+//             status = nc_def_var( fpImage, szBandName, nDataType, 
+//                                  NCDF_NBDIM, anBandDims, &NCDFVarID );
+
+//             NCDF_DEF_VAR_DEFLATE;
+            
+//             nlNoDataValue= (GInt32) dfNoDataValue;
+//             nc_put_att_int( fpImage, NCDFVarID, _FillValue, 
+//                             nDataType, 1, &nlNoDataValue );
+
+// /* -------------------------------------------------------------------- */
+// /*      Read and write data from band i                                 */
+// /* -------------------------------------------------------------------- */
+//             status = nc_enddef( fpImage );
+
+//             panScanline = (GInt32 *) CPLMalloc( 1 * nXSize *
+//                                                 sizeof( GInt32 ) );
+
+//             for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
+
+//                 eErr = poSrcBand->RasterIO( GF_Read, 0, iLine, nXSize, 1, 
+//                                             panScanline, nXSize, 1, GDT_Int32,
+//                                             0,0);
+
+//                 start[0]=starty[iLine];          
+//                 status = nc_put_vara_int( fpImage, NCDFVarID, start,
+//                                           count, panScanline);
+//             }
+
+//             CPLFree( panScanline );
+
+//             status = nc_redef( fpImage );
+
+// /* -------------------------------------------------------------------- */
+// /*      float                                                           */
+// /* -------------------------------------------------------------------- */
+//         } else if( (eDT == GDT_Float32) ) {
+
+//             CPLDebug( "GDAL_netCDF", "%s = GDT_Float32 ",szBandName );
+
+//             nDataType = NC_FLOAT;
+
+// /* -------------------------------------------------------------------- */
+// /*      Define variable and attributes                                  */
+// /* -------------------------------------------------------------------- */
+//             status = nc_def_var( fpImage, szBandName, nDataType, 
+//                                  NCDF_NBDIM, anBandDims, &NCDFVarID );
+
+//             NCDF_DEF_VAR_DEFLATE;
+
+//             fNoDataValue= (float) dfNoDataValue;
+//             nc_put_att_float( fpImage, NCDFVarID, _FillValue, 
+//                               nDataType, 1, &fNoDataValue );
+
+// /* -------------------------------------------------------------------- */
+// /*      Read and write data from band i                                 */
+// /* -------------------------------------------------------------------- */
+//             status = nc_enddef( fpImage );
+
+//             pafScanline = (float *) CPLMalloc( 1 * nXSize *
+//                                                sizeof( float ) );
+
+//             for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
+
+//                 eErr = poSrcBand->RasterIO( GF_Read, 0, iLine, nXSize, 1, 
+//                                             pafScanline, nXSize, 1, GDT_Float32, 
+//                                             0,0);
+
+//                 start[0]=starty[iLine];          
+//                 status = nc_put_vara_float( fpImage, NCDFVarID, start,
+//                                             count, pafScanline);
+//             }
+
+//             CPLFree( pafScanline );
+
+//             status = nc_redef( fpImage );
+
+// /* -------------------------------------------------------------------- */
+// /*      double                                                          */
+// /* -------------------------------------------------------------------- */
+//         } else if( (eDT == GDT_Float64) ) {
+
+//             CPLDebug( "GDAL_netCDF", "%s = GDT_Float64 ",szBandName );
+
+//             nDataType = NC_DOUBLE;
+
+// /* -------------------------------------------------------------------- */
+// /*      Define variable and attributes                                  */
+// /* -------------------------------------------------------------------- */
+//             status = nc_def_var( fpImage, szBandName, nDataType, 
+//                                  NCDF_NBDIM, anBandDims, &NCDFVarID );
+
+//             NCDF_DEF_VAR_DEFLATE;
+
+//             nc_put_att_double( fpImage, NCDFVarID, _FillValue,
+//                                nDataType, 1, &dfNoDataValue );
+
+// /* -------------------------------------------------------------------- */
+// /*      Read and write data from band i                                 */
+// /* -------------------------------------------------------------------- */
+//             status = nc_enddef( fpImage );
+
+//             padScanline = (double *) CPLMalloc( 1 * nXSize *
+//                                                 sizeof( double ) );
+
+//             for( int iLine = 0; iLine < nYSize && eErr == CE_None; iLine++ )  {
+
+//                 eErr = poSrcBand->RasterIO( GF_Read, 0, iLine, nXSize, 1, 
+//                                             padScanline, nXSize, 1, 
+//                                             GDT_Float64,
+//                                             0,0);
+
+//                 start[0]=starty[iLine];          
+//                 status = nc_put_vara_double( fpImage, NCDFVarID, start,
+//                                              count, padScanline);
+//             }
+
+//             CPLFree( padScanline );
+
+//             status = nc_redef( fpImage );
+
+//         }
+//         else {
+//             CPLError( CE_Failure, CPLE_NotSupported,
+//                       "The NetCDF driver does not support GDAL data type %d",
+//                       eDT );
+//         }
+        
+// /* -------------------------------------------------------------------- */
+// /*      Copy Metadata for band                                          */
+// /* -------------------------------------------------------------------- */
+
+//         nc_put_att_text( fpImage, NCDFVarID, CF_LNG_NAME, 
+//                          strlen( szLongName ), szLongName );
+
+//         CopyMetadata( (void *) hBand, fpImage, NCDFVarID );
+
+// /* -------------------------------------------------------------------- */
+// /*      Write Projection for band                                       */
+// /* -------------------------------------------------------------------- */
+//         if( bWriteGridMapping == TRUE ) {
+//             nc_put_att_text( fpImage, NCDFVarID, CF_GRD_MAPPING,
+//                              strlen( szNetcdfProjection ),
+//                              szNetcdfProjection );
+//             if ( bWriteLonLat == TRUE ) {
+//                 nc_put_att_text( fpImage, NCDFVarID, CF_COORDINATES,
+//                                  strlen( NCDF_LONLAT ), NCDF_LONLAT );
+//             }           
+//         }
+
+//         dfTemp =  ( i / nBands );            
+//         pfnProgress( dfTemp, NULL, pProgressData );
+
+//     } // for nBands
+
+// }
+
+
+
+/* TODO create WriteIBlock and used that instead */
+void
+NCDFCreateHelper::CopyBandData( GDALDataset *poSrcDS, 
+                                GDALProgressFunc pfnProgress, void *pProgressData )
+{
 /* -------------------------------------------------------------------- */
 /*      Create netCDF variable                                          */
 /* -------------------------------------------------------------------- */
 
     for( int i=1; i <= nBands; i++ ) {
+
+        CPLDebug( "GDAL_netCDF", "CopyBandData(), i=%d/%d ",i,nBands );
 
         char      szBandName[ NC_MAX_NAME ];
         GByte     *pabScanline  = NULL;
@@ -3822,44 +4789,16 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         GInt32    *panScanline  = NULL;
         float     *pafScanline  = NULL;
         double    *padScanline  = NULL;
-        int       NCDFVarID = 0;
+        int       NCDFVarID = panNCDFVarID[i-1];/* i starts at 1 */
         size_t    start[ NCDF_NBDIM ];
         size_t    starty[ nYSize ];
         size_t    count[ NCDF_NBDIM ];
-        double    dfNoDataValue;
-        /* unsigned char not supported by netcdf-3 */
-        signed char cNoDataValue; 
-        unsigned char ucNoDataValue; 
-        float     fNoDataValue;
-        int       nlNoDataValue;
-        short     nsNoDataValue;
         GDALRasterBandH	hBand;
         const char *tmpMetadata;
-        char      szLongName[ NC_MAX_NAME ];
 
         nc_type nDataType = NC_NAT;
         GDALRasterBand *poSrcBand = poSrcDS->GetRasterBand( i );
         hBand = GDALGetRasterBand( poSrcDS, i );
-
-        /* Get var name from NETCDF_VARNAME */
-        tmpMetadata = poSrcBand->GetMetadataItem("NETCDF_VARNAME");
-       	if( tmpMetadata != NULL) {
-            if( nBands > 1 ) sprintf(szBandName,"%s%d",tmpMetadata,i);
-            else strcpy( szBandName, tmpMetadata );
-            // poSrcBand->SetMetadataItem("NETCDF_VARNAME","");
-        }
-        else 
-            sprintf( szBandName, "Band%d", i );
-
-        /* Get long_name from <var>#long_name */
-        sprintf(szLongName,"%s#%s",
-                poSrcBand->GetMetadataItem("NETCDF_VARNAME"),
-                CF_LNG_NAME);
-        tmpMetadata = poSrcDS->GetMetadataItem(szLongName);
-        if( tmpMetadata != NULL) 
-            strcpy( szLongName, tmpMetadata);
-        else 
-            sprintf( szLongName, "GDAL Band Number %d", i); 
 
 /* -------------------------------------------------------------------- */
 /*      Avoid code duplication                                          */
@@ -3875,7 +4814,7 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                 starty[iLine] = nYSize - iLine - 1;
         }
 
-        CPLDebug("GDAL_netCDF", "Writing Band #%d - %s", i, szLongName );
+        CPLDebug("GDAL_netCDF", "Writing Band #%d", i );
 
 /* -------------------------------------------------------------------- */
 /*      Get Data type                                                   */
@@ -3885,31 +4824,17 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
         eErr = CE_None;
 
-        dfNoDataValue = poSrcBand->GetNoDataValue(0);
-
 /* -------------------------------------------------------------------- */
 /*      Byte                                                            */
 /* -------------------------------------------------------------------- */
         if( eDT == GDT_Byte ) {
-            CPLDebug( "GDAL_netCDF", "%s = GDT_Byte ",szBandName );
- 
-/* -------------------------------------------------------------------- */
-/*      Define variable and attributes                                  */
-/* -------------------------------------------------------------------- */
 
-//             /* Byte can be of different type according to file version */
-// #ifdef NETCDF_HAS_NC4
-//             /* NC4 supports NC_UBYTE, but should it always be ubyte? */
-//             if ( nFormat == NCDF_FORMAT_NC4 )
-//                 nDataType = NC_UBYTE; 
-//             else 
-// #endif
-                // nDataType = NC_BYTE;
+            // CPLDebug( "GDAL_netCDF", "%s = GDT_Byte ",szBandName );
+            CPLDebug( "GDAL_netCDF", "%s = GDT_Byte id=%d",szBandName, NCDFVarID);
 
             nDataType = NC_BYTE;
 
-            /* GDAL defaults to unsigned bytes, but check if metadata says its
-               signed, as NetCDF can support this for certain formats. */
+            /* TODO create variable, as this is duplicated from DefineBands() */
             int nSignedByte = FALSE;
             tmpMetadata = poSrcBand->GetMetadataItem("PIXELTYPE",
                                                      "IMAGE_STRUCTURE");
@@ -3925,55 +4850,10 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                     nDataType = NC_UBYTE; 
 #endif
             }
-            
-            status = nc_def_var( fpImage, szBandName, nDataType, 
-                                 NCDF_NBDIM, anBandDims, &NCDFVarID );
-            NCDF_ERR(status);
-            
-            NCDF_DEF_VAR_DEFLATE;
-            
-            /* Fill Value */
-            // cNoDataValue=(unsigned char) dfNoDataValue;
-            // nc_put_att_schar( fpImage, NCDFVarID, _FillValue,
-            //                   nDataType, 1, &cNoDataValue );            
-            // NCDF_ERR(status);
-            if ( nSignedByte ) {
-                cNoDataValue = (signed char) dfNoDataValue;
-                status = nc_put_att_schar( fpImage, NCDFVarID, _FillValue,
-                                           nDataType, 1, &cNoDataValue );            
-            }
-            else {
-                ucNoDataValue = (unsigned char) dfNoDataValue;
-                status = nc_put_att_uchar( fpImage, NCDFVarID, _FillValue,
-                                           nDataType, 1, &ucNoDataValue );            
-                NCDF_ERR(status);
-            }
-            
-            /* For unsigned NC_BYTE (except NC4 format) */
-            /* add valid_range and _Unsigned ( defined in CF-1 and NUG ) */
-            if ( (nDataType == NC_BYTE) && (nFormat != NCDF_FORMAT_NC4) ) {
-                short int adfValidRange[2]; 
-                if  ( nSignedByte ) {
-                    adfValidRange[0] = -128;
-                    adfValidRange[1] = 127;
-                    status = nc_put_att_text( fpImage, NCDFVarID, 
-                                              "_Unsigned", 5, "false" );
-                }
-                else {
-                    adfValidRange[0] = 0;
-                    adfValidRange[1] = 255;
-                    status = nc_put_att_text( fpImage, NCDFVarID, 
-                                              "_Unsigned", 4, "true" );
-                }
-                status=nc_put_att_short( fpImage, NCDFVarID, "valid_range",
-                                         NC_SHORT, 2, adfValidRange );
-            }
-            
+
 /* -------------------------------------------------------------------- */
 /*      Read and write data from band i                                 */
 /* -------------------------------------------------------------------- */
-            /* End define mode */
-            status = nc_enddef( fpImage );
 
             pabScanline = (GByte *) CPLMalloc( 1 * nXSize * sizeof(GByte) );
             
@@ -3984,9 +4864,9 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                                             0,0);
                 
                 start[0]=starty[iLine];          
-                // status = nc_put_vara_uchar (fpImage, NCDFVarID, start,
-                //                             count, pabScanline);
-                // NCDF_ERR(status);
+                status = nc_put_vara_uchar (fpImage, NCDFVarID, start,
+                                            count, pabScanline);
+                NCDF_ERR(status);
                 if ( nSignedByte ) 
                     status = nc_put_vara_schar (fpImage, NCDFVarID, start,
                                                 count, (const signed char*)pabScanline);
@@ -4007,13 +4887,11 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 //                                             count, pabScanline);             
 // #endif
 
-                NCDF_ERR(status);
+                // NCDF_ERR(status);
             }
 
             CPLFree( pabScanline );
 
-            /* Back to define mode */
-           status = nc_redef( fpImage );
 
 /* -------------------------------------------------------------------- */
 /*      Int16                                                           */
@@ -4022,23 +4900,11 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         } else if( ( eDT == GDT_UInt16 ) || ( eDT == GDT_Int16 ) ) {
             CPLDebug( "GDAL_netCDF", "%s = GDT_Int16 ",szBandName );
 
-/* -------------------------------------------------------------------- */
-/*      Define variable and attributes                                  */
-/* -------------------------------------------------------------------- */
             nDataType = NC_SHORT;
-            status = nc_def_var( fpImage, szBandName, nDataType, 
-                                 NCDF_NBDIM, anBandDims, &NCDFVarID );
-
-            NCDF_DEF_VAR_DEFLATE;
-
-            nsNoDataValue= (GInt16) dfNoDataValue;
-            nc_put_att_short( fpImage, NCDFVarID, _FillValue,
-                              nDataType, 1, &nsNoDataValue );
 
 /* -------------------------------------------------------------------- */
 /*      Read and write data from band i                                 */
 /* -------------------------------------------------------------------- */
-            status = nc_enddef( fpImage );
 
             pasScanline = (GInt16 *) CPLMalloc( 1 * nXSize *
                                                 sizeof( GInt16 ) );
@@ -4056,32 +4922,19 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
             CPLFree( pasScanline );
 
-            status = nc_redef( fpImage );
-
 /* -------------------------------------------------------------------- */
 /*      Int32                                                           */
 /* -------------------------------------------------------------------- */
 
         } else if( (eDT == GDT_UInt32) || (eDT == GDT_Int32) ) {
+
             CPLDebug( "GDAL_netCDF", "%s = GDT_Int32 ",szBandName );
 
-/* -------------------------------------------------------------------- */
-/*      Define variable and attributes                                  */
-/* -------------------------------------------------------------------- */
             nDataType = NC_INT;
-            status = nc_def_var( fpImage, szBandName, nDataType, 
-                                 NCDF_NBDIM, anBandDims, &NCDFVarID );
-
-            NCDF_DEF_VAR_DEFLATE;
-            
-            nlNoDataValue= (GInt32) dfNoDataValue;
-            nc_put_att_int( fpImage, NCDFVarID, _FillValue, 
-                            nDataType, 1, &nlNoDataValue );
 
 /* -------------------------------------------------------------------- */
 /*      Read and write data from band i                                 */
 /* -------------------------------------------------------------------- */
-            status = nc_enddef( fpImage );
 
             panScanline = (GInt32 *) CPLMalloc( 1 * nXSize *
                                                 sizeof( GInt32 ) );
@@ -4099,31 +4952,18 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
             CPLFree( panScanline );
 
-            status = nc_redef( fpImage );
-
 /* -------------------------------------------------------------------- */
 /*      float                                                           */
 /* -------------------------------------------------------------------- */
         } else if( (eDT == GDT_Float32) ) {
+
             CPLDebug( "GDAL_netCDF", "%s = GDT_Float32 ",szBandName );
 
-/* -------------------------------------------------------------------- */
-/*      Define variable and attributes                                  */
-/* -------------------------------------------------------------------- */
             nDataType = NC_FLOAT;
-            status = nc_def_var( fpImage, szBandName, nDataType, 
-                                 NCDF_NBDIM, anBandDims, &NCDFVarID );
-
-            NCDF_DEF_VAR_DEFLATE;
-
-            fNoDataValue= (float) dfNoDataValue;
-            nc_put_att_float( fpImage, NCDFVarID, _FillValue, 
-                              nDataType, 1, &fNoDataValue );
 
 /* -------------------------------------------------------------------- */
 /*      Read and write data from band i                                 */
 /* -------------------------------------------------------------------- */
-            status = nc_enddef( fpImage );
 
             pafScanline = (float *) CPLMalloc( 1 * nXSize *
                                                sizeof( float ) );
@@ -4141,30 +4981,18 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
             CPLFree( pafScanline );
 
-            status = nc_redef( fpImage );
-
 /* -------------------------------------------------------------------- */
 /*      double                                                          */
 /* -------------------------------------------------------------------- */
         } else if( (eDT == GDT_Float64) ) {
+            
             CPLDebug( "GDAL_netCDF", "%s = GDT_Float64 ",szBandName );
 
-/* -------------------------------------------------------------------- */
-/*      Define variable and attributes                                  */
-/* -------------------------------------------------------------------- */
             nDataType = NC_DOUBLE;
-            status = nc_def_var( fpImage, szBandName, nDataType, 
-                                 NCDF_NBDIM, anBandDims, &NCDFVarID );
-
-            NCDF_DEF_VAR_DEFLATE;
-
-            nc_put_att_double( fpImage, NCDFVarID, _FillValue,
-                               nDataType, 1, &dfNoDataValue );
 
 /* -------------------------------------------------------------------- */
 /*      Read and write data from band i                                 */
 /* -------------------------------------------------------------------- */
-            status = nc_enddef( fpImage );
 
             padScanline = (double *) CPLMalloc( 1 * nXSize *
                                                 sizeof( double ) );
@@ -4183,8 +5011,6 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
             CPLFree( padScanline );
 
-            status = nc_redef( fpImage );
-
         }
         else {
             CPLError( CE_Failure, CPLE_NotSupported,
@@ -4192,56 +5018,34 @@ NCDFCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                       eDT );
         }
         
-/* -------------------------------------------------------------------- */
-/*      Copy Metadata for band                                          */
-/* -------------------------------------------------------------------- */
-
-        nc_put_att_text( fpImage, NCDFVarID, CF_LNG_NAME, 
-                         strlen( szLongName ), szLongName );
-
-        CopyMetadata( (void *) hBand, fpImage, NCDFVarID );
-
-/* -------------------------------------------------------------------- */
-/*      Write Projection for band                                       */
-/* -------------------------------------------------------------------- */
-        if( bWriteGridMapping == TRUE ) {
-            nc_put_att_text( fpImage, NCDFVarID, CF_GRD_MAPPING,
-                             strlen( pszNetcdfProjection ),
-                             pszNetcdfProjection );
-            if ( bWriteLonLat == TRUE ) {
-                nc_put_att_text( fpImage, NCDFVarID, CF_COORDINATES,
-                                 strlen( NCDF_LONLAT ), NCDF_LONLAT );
-            }           
-        }
-
-        dfTemp = 0.50 + ( (0.90 - 0.50) * i / nBands );            
+        dfTemp =  i / nBands ;            
         pfnProgress( dfTemp, NULL, pProgressData );
 
     } // for nBands
 
+    status = nc_redef( fpImage );
+    NCDF_ERR(status);
 
-/* -------------------------------------------------------------------- */
-/*      Cleanup and close.                                              */
-/* -------------------------------------------------------------------- */
-    nc_close( fpImage );
-// CPLFree(pszProj4Defn );
- 
-    pfnProgress( 0.95, NULL, pProgressData );
-
-/* -------------------------------------------------------------------- */
-/*      Re-open dataset, and copy any auxilary pam information.         */
-/*      Disable PAM, at least temporarily. See bug #4244                */
-/* -------------------------------------------------------------------- */
-    netCDFDataset *poDS = (netCDFDataset *) GDALOpen( pszFilename, GA_ReadOnly );
-
-    // if( poDS )
-    //     poDS->CloneInfo( poSrcDS, GCIF_PAM_DEFAULT );
-    
-    pfnProgress( 1.0, NULL, pProgressData );
-
-    return poDS;
 }
 
+void NCDFCreateHelper::DefVarDeflate( int nVarId, int bChunking )
+{
+#ifdef NETCDF_HAS_NC4
+    // must set chunk size to avoid huge performace hit                
+    // perhaps another solution it to change the chunk cache?
+    // http://www.unidata.ucar.edu/software/netcdf/docs/netcdf.html#Chunk-Cache   
+    if ( nCompress == NCDF_COMPRESS_DEFLATE ) {                         
+        status = nc_def_var_deflate(fpImage,nVarId,1,1,nZLevel);
+        NCDF_ERR(status);
+        if ( bChunking ) {
+            size_t chunksize[] = { 1, nXSize };                   
+            status = nc_def_var_chunking( fpImage, nVarId,          
+                                          NC_CHUNKED, chunksize );
+            NCDF_ERR(status);
+        }
+    } 
+#endif
+}
 
 /************************************************************************/
 /*                          GDALRegister_netCDF()                       */
@@ -4331,7 +5135,9 @@ void GDALRegister_netCDF()
  
         /* set pfns and register driver */
         poDriver->pfnOpen = netCDFDataset::Open;
-        poDriver->pfnCreateCopy = NCDFCreateCopy;
+        // poDriver->pfnCreateCopy = NCDFCreateCopy;
+        poDriver->pfnCreateCopy = NCDFCreateCopy3;
+        // poDriver->pfnCreate = NCDFCreate;
         poDriver->pfnIdentify = netCDFDataset::Identify;
 
         GetGDALDriverManager( )->RegisterDriver( poDriver );
@@ -4808,6 +5614,9 @@ CPLErr NCDFPutAttr( int nCdfId, int nVarId,
     float   fValue = 0.0f;
     double  dfValue = 0.0;
 
+    // CPLDebug( "GDAL_netCDF", "NCDFPutAttr(%d, %d, %s, %s)", 
+    //           nCdfId, nVarId,pszAttrName, pszValue );
+
     if ( EQUAL( pszValue, "" ) )
         return CE_Failure;
 
@@ -4861,7 +5670,8 @@ CPLErr NCDFPutAttr( int nCdfId, int nVarId,
     /* now write the data */
     if ( !bIsArray && nAttrType == NC_CHAR ) {
         nc_put_att_text( nCdfId, nVarId, pszAttrName,
-                         strlen( pszValue ), pszValue );               
+                         strlen( pszValue ), pszValue );    
+        NCDF_ERR(status);           
     }
     else {
         
@@ -4874,6 +5684,7 @@ CPLErr NCDFPutAttr( int nCdfId, int nVarId,
                 }
                 status = nc_put_att_int( nCdfId, nVarId, pszAttrName, 
                                          NC_INT, nAttrLen, pnTemp );  
+                NCDF_ERR(status);
                 CPLFree(pnTemp);
             break;
             case  NC_FLOAT:
@@ -4883,7 +5694,8 @@ CPLErr NCDFPutAttr( int nCdfId, int nVarId,
                     pfTemp[i] = (float)strtod( papszValues[i], &pszTemp );
                 }
                 status = nc_put_att_float( nCdfId, nVarId, pszAttrName, 
-                                           NC_FLOAT, nAttrLen, pfTemp );  
+                                           NC_FLOAT, nAttrLen, pfTemp );
+                NCDF_ERR(status);  
                 CPLFree(pfTemp);
             break;
             case  NC_DOUBLE:
@@ -4893,7 +5705,8 @@ CPLErr NCDFPutAttr( int nCdfId, int nVarId,
                     pdfTemp[i] = strtod( papszValues[i], &pszTemp );
                 }
                 status = nc_put_att_double( nCdfId, nVarId, pszAttrName, 
-                                            NC_DOUBLE, nAttrLen, pdfTemp );  
+                                            NC_DOUBLE, nAttrLen, pdfTemp ); 
+                NCDF_ERR(status); 
                 CPLFree(pdfTemp);
             break;
         default:
