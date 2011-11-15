@@ -583,6 +583,32 @@ static const oNetcdfSRS_PT poNetcdfSRS_PT[] = {
     {NULL, NULL, NULL },
 };
 
+typedef struct {
+    char      **papszCreationOptions;
+    /* int nFormat; */
+    int nCompress;
+    int nZLevel;
+    int nCreateMode;
+    /* int nXDimID; */
+    /* int nYDimID; */
+    /* int bDefineMode;     */
+    /* int bIsProjected; */
+    /* int bIsGeographic; */
+
+    /* int  bWriteGridMapping; */
+    /* int  bWriteLonLat; */
+    /* int  bWriteGDALTags; */
+    /* int  bWriteGeoTransform; */
+    char szNetcdfProjection[ NC_MAX_NAME ];
+    int nLonSize;
+    int nLatSize;
+    nc_type eLonLatType;
+    /* int bSetProjection; //TODO use bGotGeoTransform instead?? */
+    /* int bSetGeoTransform; */ //replaced by setgeotransform and setprojection
+    /* int status; */
+
+} sNetcdfCreateVars;
+
 /************************************************************************/
 /* ==================================================================== */
 /*			     netCDFDataset		                             		*/
@@ -593,17 +619,41 @@ class netCDFRasterBand;
 
 class netCDFDataset : public GDALPamDataset
 {
-    CPLString    osSubdatasetName;
-    int          bTreatAsSubdataset;
+    friend class netCDFRasterBand; //TMP
 
-    double      adfGeoTransform[6];
-    char        **papszSubDatasets;
-    char        **papszGeolocation;
-    CPLString    osFilename;
-    int          *panBandDimPos;         // X, Y, Z postion in array
-    int          *panBandZLev;
+    /* basic dataset vars */
+    CPLString     osFilename;
+    int           cdfid;
+    char          **papszSubDatasets;
+    char          **papszMetadata;
+    CPLStringList papszDimName;
+    bool          bBottomUp;
+    int           nFormat;
+    int           bIsGdalFile; /* was this file created by GDAL? */
+    int           bIsGdalCfFile; /* was this file created by the (new) CF-compliant driver? */
+
+    /* projection/GT */
+    double       adfGeoTransform[6];
     char         *pszProjection;
-    int          bGotGeoTransform;
+    int          nXDimID;
+    int          nYDimID;
+    int          bIsProjected;
+    int          bIsGeographic;
+
+    /* state vars */
+    int          status;
+    int          bDefineMode;
+    int          bSetProjection; 
+    int          bSetGeoTransform;
+    int          bAddedProjectionVars;
+
+    /* create vars */
+    char         **papszCreationOptions;
+    int          nCompress;
+    int          nZLevel;
+    int          nCreateMode;
+    int          bSignedData;
+
     double       rint( double );
 
     double       FetchCopyParm( const char *pszGridMappingValue, 
@@ -611,39 +661,54 @@ class netCDFDataset : public GDALPamDataset
 
     char **      FetchStandardParallels( const char *pszGridMappingValue );
 
-    static int IdentifyFormat( GDALOpenInfo *, bool );
-
-  public:
-    int           cdfid;
-    char         **papszMetadata;
-    char          papszDimName[NC_MAX_NAME][1024];
-    int          *paDimIds;
-    size_t        xdim, ydim;
-    int           nDimXid, nDimYid;
-    bool          bBottomUp;
-    int           nFormat;
-    int           bIsGdalFile; /* was this file created by GDAL? */
-    int           bIsGdalCfFile; /* was this file created by the (new) CF-compliant driver? */
-
-    netCDFDataset( );
-    ~netCDFDataset( );
     
-    static int Identify( GDALOpenInfo * );
-    static GDALDataset *Open( GDALOpenInfo * );
+    /* new */
+    void ProcessCreationOptions( );
+    int DefVarDeflate( int nVarId, int bChunking=TRUE );
+    CPLErr AddProjectionVars( GDALProgressFunc pfnProgress=GDALDummyProgress, 
+                              void * pProgressData=NULL );
+
+    int GetDefineMode() { return bDefineMode; }
+    int SetDefineMode( int bNewDefineMode );
 
     /* CPLErr      SafeStrcat(char**, char*, size_t*); */
     CPLErr      ReadAttributes( int, int );
-
-    CPLErr 	GetGeoTransform( double * );    
-
-    const char * GetProjectionRef();
-
-    char ** GetMetadata( const char * );
 
     void  CreateSubDatasetList( );
 
     void  SetProjection( int );
 
+  public:
+
+    netCDFDataset( );
+    ~netCDFDataset( );
+    
+    /* Projection/GT */
+    CPLErr 	GetGeoTransform( double * );    
+    CPLErr 	SetGeoTransform (double *);
+    const char * GetProjectionRef();
+    CPLErr 	SetProjection (const char *);
+
+    char ** GetMetadata( const char * );
+
+    int GetCDFID() { return cdfid; }
+
+    /* static functions */
+    static int Identify( GDALOpenInfo * );
+    static int IdentifyFormat( GDALOpenInfo *, bool );
+    static GDALDataset *Open( GDALOpenInfo * );
+
+    static netCDFDataset *CreateLL( const char * pszFilename,
+                                    int nXSize, int nYSize, int nBands,
+                                    char ** papszOptions );
+    static GDALDataset *Create( const char * pszFilename,
+                                int nXSize, int nYSize, int nBands,
+                                GDALDataType eType,
+                                char ** papszOptions );
+    static GDALDataset* CreateCopy( const char * pszFilename, GDALDataset *poSrcDS, 
+                                    int bStrict, char ** papszOptions, 
+                                    GDALProgressFunc pfnProgress, void * pProgressData );
+        
 };
 
 #endif

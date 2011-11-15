@@ -6296,14 +6296,20 @@ int OGRSpatialReference::IsSame( const OGRSpatialReference * poOtherSRS ) const
 /*      Compare geographic coordinate system.                           */
 /* -------------------------------------------------------------------- */
     if( !IsSameGeogCS( poOtherSRS ) )
+    {
+        CPLDebug( "OSR", "IsSame() : IsSameGeogCS() returned false" );
         return FALSE;
+    }
 
 /* -------------------------------------------------------------------- */
 /*      Do the have the same root types?  Ie. is one PROJCS and one     */
 /*      GEOGCS or perhaps LOCALCS?                                      */
 /* -------------------------------------------------------------------- */
     if( !EQUAL(GetRoot()->GetValue(),poOtherSRS->GetRoot()->GetValue()) )
+    {
+        CPLDebug( "OSR", "IsSame() : different Root values" );
         return FALSE;
+    }
 
 /* -------------------------------------------------------------------- */
 /*      Compare projected coordinate system.                            */
@@ -6317,7 +6323,10 @@ int OGRSpatialReference::IsSame( const OGRSpatialReference * poOtherSRS ) const
         pszValue2 = poOtherSRS->GetAttrValue( "PROJECTION" );
         if( pszValue1 == NULL || pszValue2 == NULL
             || !EQUAL(pszValue1,pszValue2) )
+        {
+            CPLDebug( "OSR", "IsSame() : PROJECTION node is different" );
             return FALSE;
+        }
 
         for( int iChild = 0; iChild < poPROJCS->GetChildCount(); iChild++ )
         {
@@ -6329,9 +6338,19 @@ int OGRSpatialReference::IsSame( const OGRSpatialReference * poOtherSRS ) const
                 continue;
 
             /* this this eventually test within some epsilon? */
-            if( this->GetProjParm( poNode->GetChild(0)->GetValue() )
-                != poOtherSRS->GetProjParm( poNode->GetChild(0)->GetValue() ) )
+            // if( this->GetProjParm( poNode->GetChild(0)->GetValue() )
+            //     != poOtherSRS->GetProjParm( poNode->GetChild(0)->GetValue() ) )
+            if( ! CPLIsEqual( this->GetProjParm( poNode->GetChild(0)->GetValue() ),
+                              poOtherSRS->GetProjParm( poNode->GetChild(0)->GetValue() ) ) )
+            {
+                CPLDebug( "OSR", "IsSame() : %s node different (%.18g,%.18g), diff=%.18g",
+                          poNode->GetChild(0)->GetValue(),
+                          this->GetProjParm( poNode->GetChild(0)->GetValue() ),
+                          poOtherSRS->GetProjParm( poNode->GetChild(0)->GetValue() ),
+                          (this->GetProjParm( poNode->GetChild(0)->GetValue() ) - 
+                          poOtherSRS->GetProjParm( poNode->GetChild(0)->GetValue() )));
                 return FALSE;
+            }
         }
     }
 
@@ -6346,7 +6365,12 @@ int OGRSpatialReference::IsSame( const OGRSpatialReference * poOtherSRS ) const
 
             dfRatio = poOtherSRS->GetLinearUnits() / GetLinearUnits();
             if( dfRatio < 0.9999999999 || dfRatio > 1.000000001 )
+            {
+                CPLDebug( "OSR", "IsSame() : units differ, ratio=%f",
+                          dfRatio );
+
                 return FALSE;
+            }
         }
     }
 
