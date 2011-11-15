@@ -139,7 +139,6 @@ class netCDFRasterBand : public GDALPamRasterBand
                       int bSigned=TRUE,
                       char *pszBandName=NULL,
                       char *pszLongName=NULL );
-    //    netCDFRasterBand( GDALDataset *poSrcDS, int nBand );
    ~netCDFRasterBand( );
 
     virtual double GetNoDataValue( int * );
@@ -150,7 +149,6 @@ class netCDFRasterBand : public GDALPamRasterBand
     virtual CPLErr SetScale( double );
     virtual CPLErr IReadBlock( int, int, void * );
     virtual CPLErr IWriteBlock( int, int, void * );
-    // virtual CPLErr FlushCache( void ); //???
 
 };
 
@@ -1345,8 +1343,8 @@ netCDFDataset::~netCDFDataset()
 
 {
 
-    /* make sure projection is written unless GeoTransform OR Projection are missing */
-    if( (GetAccess() == GA_Update) && (! bAddedProjectionVars) ) {
+    /* make sure projection is written if GeoTransform OR Projection are missing */
+        if( (GetAccess() == GA_Update) && (! bAddedProjectionVars) ) {
         if ( bSetProjection && ! bSetGeoTransform )
             AddProjectionVars();
         else if ( bSetGeoTransform && ! bSetProjection )
@@ -2905,6 +2903,11 @@ CPLErr netCDFDataset::AddProjectionVars( GDALProgressFunc pfnProgress,
 /* -------------------------------------------------------------------- */
     /* make sure we are in define mode */
     SetDefineMode( TRUE );
+
+
+/* -------------------------------------------------------------------- */
+/*      Rename dimensions if lon/lat                                    */
+/* -------------------------------------------------------------------- */
     if( ! bIsProjected ) 
     {
         /* rename dims to lat/lon */
@@ -2919,12 +2922,17 @@ CPLErr netCDFDataset::AddProjectionVars( GDALProgressFunc pfnProgress,
         // anBandDims[0] = nLatDimID;
         // anBandDims[1] = nLonDimID;       
     }
+
 /* -------------------------------------------------------------------- */
 /*      Write projection attributes                                     */
 /* -------------------------------------------------------------------- */
     if( bIsProjected ) 
     {
-        const OGR_SRSNode *poPROJCS = oSRS.GetAttrNode( "PROJCS" );
+/* -------------------------------------------------------------------- */
+/*      Write CF-1.5 compliant Projected attributes                     */
+/* -------------------------------------------------------------------- */
+ 
+       const OGR_SRSNode *poPROJCS = oSRS.GetAttrNode( "PROJCS" );
         const char  *pszProjName;
         pszProjName = oSRS.GetAttrValue( "PROJECTION" );
 
@@ -2953,16 +2961,11 @@ CPLErr netCDFDataset::AddProjectionVars( GDALProgressFunc pfnProgress,
         // PDS: keep in synch with SetProjection function
         NCDFWriteProjAttribs(poPROJCS, pszProjName, cdfid, NCDFVarID);
         
-        /* also add vars??? */
     }
-
-
-    /* If not Projected assume Geographic to catch grids without Datum */
     else 
     {
-
 /* -------------------------------------------------------------------- */
-/*      Write CF-1.x compliant Geographics attributes                   */
+/*      Write CF-1.5 compliant Geographics attributes                   */
 /*      Note: WKT information will not be preserved (e.g. WGS84)        */
 /* -------------------------------------------------------------------- */
         
@@ -2980,6 +2983,10 @@ CPLErr netCDFDataset::AddProjectionVars( GDALProgressFunc pfnProgress,
         }
         
     }
+
+/* -------------------------------------------------------------------- */
+/*      Write CF-1.5 compliant common attributes                        */
+/* -------------------------------------------------------------------- */
 
     /* DATUM information */
     dfTemp = oSRS.GetPrimeMeridian();
@@ -3012,9 +3019,10 @@ CPLErr netCDFDataset::AddProjectionVars( GDALProgressFunc pfnProgress,
         // }
         nc_put_att_text( cdfid, NCDFVarID, NCDF_SPATIAL_REF,
                          strlen( pszProjection ), pszProjection );
-        /* for now write the geotransform for back-compat */
-        /* the old (1.8.1) driver overrides the CF geotransform with */
-        /* empty values from dfNN, dfSN, dfEE, dfWE; */
+        /* for now write the geotransform for back-compat or else 
+           the old (1.8.1) driver overrides the CF geotransform with 
+           empty values from dfNN, dfSN, dfEE, dfWE; */
+        /* TODO: fix this in 1.8 branch */
         if ( bWriteGeoTransform && bSetGeoTransform ) {
             nc_put_att_text( cdfid, NCDFVarID, NCDF_GEOTRANSFORM,
                              strlen( szGeoTransform ),
@@ -3023,7 +3031,7 @@ CPLErr netCDFDataset::AddProjectionVars( GDALProgressFunc pfnProgress,
     }
 
 /* -------------------------------------------------------------------- */
-/*      Write Projection for bands                                      */
+/*      Write Projection var in Bands                                   */
 /* -------------------------------------------------------------------- */
     if( bWriteGridMapping == TRUE ) {   
         for( int i=1; i <= nBands; i++ ) {
@@ -3054,9 +3062,6 @@ CPLErr netCDFDataset::AddProjectionVars( GDALProgressFunc pfnProgress,
 /* -------------------------------------------------------------------- */
     if( bIsProjected )
     {
-        /* make sure we are in define mode */
-        SetDefineMode( TRUE );
-
         /* X */
         int anXDims[1];
         anXDims[0] = nXDimID;
@@ -3091,16 +3096,12 @@ CPLErr netCDFDataset::AddProjectionVars( GDALProgressFunc pfnProgress,
                          strlen("y coordinate of projection"),
                          "y coordinate of projection" );
         nc_put_att_text( cdfid, NCDFVarID, CF_UNITS, 1, "m" ); 
-
-}
+    }
 
 /* -------------------------------------------------------------------- */
-/*      Write lat/lon attributes                                        */
+/*      Write lat/lon attributes if needed                              */
 /* -------------------------------------------------------------------- */
     if ( bWriteLonLat == TRUE ) {
-
-        /* make sure we are in define mode */
-        SetDefineMode( TRUE );
 
         /* latitude attributes */
         if ( bIsProjected ) {
@@ -3175,10 +3176,6 @@ CPLErr netCDFDataset::AddProjectionVars( GDALProgressFunc pfnProgress,
     dfX0=0.0, dfDX=0.0, dfY0=0.0, dfDY=0.0;
     double *padLonVal = NULL;
     double *padLatVal = NULL; /* should use float for projected, save space */
-    // size_t *startLat = NULL;
-    // size_t *countLat = NULL;
-    // size_t *startLon = NULL;
-    // size_t *countLon = NULL;
 
     if( bIsProjected )
     {
@@ -3273,9 +3270,6 @@ CPLErr netCDFDataset::AddProjectionVars( GDALProgressFunc pfnProgress,
 
             CPLDebug("GDAL_netCDF", "Transforming (X,Y)->(lon,lat)" );
 
-                /* TODO: fix this to transform and write in blocks, to lower memory needed */
-                // padLatVal = (double *) CPLMalloc( nLatSize * sizeof( double ) );
-                // padLonVal = (double *) CPLMalloc( nLonSize * sizeof( double ) );
             padLatVal = (double *) CPLMalloc( nRasterXSize * sizeof( double ) );
             padLonVal = (double *) CPLMalloc( nRasterXSize * sizeof( double ) );
             size_t start[2], count[2];
@@ -3293,13 +3287,16 @@ CPLErr netCDFDataset::AddProjectionVars( GDALProgressFunc pfnProgress,
                 
                 start[0] = j;
 
+                /* fill values to transform */
                 for( i=0; i<nRasterXSize; i++ ) {
                     padLatVal[i] = padYVal[j];
                     padLonVal[i] = padXVal[i];
                 }
-
+                
+                /* do the transform */
                 bOK = poTransform->Transform( nRasterXSize, 
                                               padLonVal, padLatVal, NULL );
+                /* write data */
                 if ( bOK ) {
                     status = nc_put_vara_double( cdfid, nVarLatID, start,
                                                  count, padLatVal);

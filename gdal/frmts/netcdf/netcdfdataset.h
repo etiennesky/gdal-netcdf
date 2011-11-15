@@ -88,14 +88,6 @@
 CPLError( CE_Failure,CPLE_AppDefined, \
 "netcdf error #%d : %s .\nat (%s,%s,%d)\n",status, nc_strerror(status), \
 __FILE__, __FUNCTION__, __LINE__ ); }
-/* #define NCDF_ERR(status) if ( status != NC_NOERR ){ \ */
-/* CPLError( CE_Failure,CPLE_AppDefined, \ */
-/* "netcdf error #%d : %s .\n",status, nc_strerror(status)); } */
-
-/* void NCDFErr(int status)  { if ( status != NC_NOERR ) {  */
-/*      CPLError( CE_Failure, CPLE_AppDefined,  */
-/*                "netcdf error #%d : %s .\n",  */
-/*                status, nc_strerror(status) ); } }  */
 
 /* check for NC2 support in case it wasn't enabled at compile time */
 /* NC4 has to be detected at compile as it requires a special build of netcdf-4 */
@@ -583,31 +575,6 @@ static const oNetcdfSRS_PT poNetcdfSRS_PT[] = {
     {NULL, NULL, NULL },
 };
 
-typedef struct {
-    char      **papszCreationOptions;
-    /* int nFormat; */
-    int nCompress;
-    int nZLevel;
-    int nCreateMode;
-    /* int nXDimID; */
-    /* int nYDimID; */
-    /* int bDefineMode;     */
-    /* int bIsProjected; */
-    /* int bIsGeographic; */
-
-    /* int  bWriteGridMapping; */
-    /* int  bWriteLonLat; */
-    /* int  bWriteGDALTags; */
-    /* int  bWriteGeoTransform; */
-    char szNetcdfProjection[ NC_MAX_NAME ];
-    int nLonSize;
-    int nLatSize;
-    nc_type eLonLatType;
-    /* int bSetProjection; //TODO use bGotGeoTransform instead?? */
-    /* int bSetGeoTransform; */ //replaced by setgeotransform and setprojection
-    /* int status; */
-
-} sNetcdfCreateVars;
 
 /************************************************************************/
 /* ==================================================================== */
